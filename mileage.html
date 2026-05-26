@@ -1,0 +1,203 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Mileage — J. Reed Consults</title>
+  <link rel="stylesheet" href="/styles.css">
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+  <script src="/supabase-config.js"></script>
+  <script src="/auth-guard.js"></script>
+</head>
+<body>
+<header class="top">
+  <div class="inner">
+    <span class="brand">J. Reed Consults</span>
+    <nav>
+      <a href="/dashboard.html">Dashboard</a>
+      <a href="/games.html">Games</a>
+      <a href="/partner-pay.html">Partner Pay</a>
+      <a href="/mileage.html" class="active">Mileage</a>
+      <a href="/expenses.html">Expenses</a>
+      <a href="/taxes.html">Taxes</a>
+      <a href="/sep.html">SEP</a>
+      <a href="/pnl.html">P&amp;L</a>
+      <a href="/settings.html">Settings</a>
+    </nav>
+    <button class="signout" id="signout">Sign out</button>
+  </div>
+</header>
+
+<div class="container">
+  <h1>Mileage</h1>
+  <p class="subtitle">Log each business trip. Tag it with the business it was for — this is how trips attribute to your jreedconsults Schedule C vs. your DWM UPE.</p>
+
+  <div class="card">
+    <h2 style="margin-top:0;" id="form-heading">Add a trip</h2>
+    <form id="trip-form">
+      <div class="row">
+        <div>
+          <label for="trip_date">Date</label>
+          <input id="trip_date" type="date" required>
+        </div>
+        <div>
+          <label for="miles">Miles</label>
+          <input id="miles" type="number" step="0.1" required>
+          <button class="btn" type="button" id="quickAtherton" style="margin-top:6px;padding:6px 10px;font-size:11px;letter-spacing:1px;">Atherton round-trip (228 mi)</button>
+        </div>
+        <div>
+          <label for="tolls">Tolls ($)</label>
+          <input id="tolls" type="number" step="0.01" value="0">
+        </div>
+        <div>
+          <label for="business">Business</label>
+          <select id="business" required>
+            <option value="jreedconsults">jreedconsults (LLC)</option>
+            <option value="dwm">DWM (K-1 / UPE)</option>
+          </select>
+        </div>
+      </div>
+      <div class="row" style="margin-top:10px;">
+        <div>
+          <label for="purpose">Purpose</label>
+          <input id="purpose" type="text" placeholder="Atherton poker game">
+        </div>
+        <div>
+          <label for="notes">Notes</label>
+          <input id="notes" type="text">
+        </div>
+      </div>
+      <button class="primary" type="submit" id="submit-btn">Save trip</button>
+      <button type="button" id="cancel-btn" style="display:none;margin-top:12px;margin-left:8px;padding:11px 22px;background:transparent;color:#5a6b5f;border:1px solid #d6d0bd;font:inherit;letter-spacing:2px;text-transform:uppercase;font-size:12px;cursor:pointer;">Cancel</button>
+      <p class="error" id="err" style="display:none"></p>
+    </form>
+  </div>
+
+  <h2>All trips</h2>
+  <div class="card" style="padding:0;">
+    <table>
+      <thead><tr>
+        <th>Date</th><th>Business</th><th>Miles</th><th>Tolls</th><th>Purpose</th><th>Notes</th><th></th>
+      </tr></thead>
+      <tbody id="rows"><tr><td colspan="7" style="padding:18px;color:#999;">Loading…</td></tr></tbody>
+    </table>
+  </div>
+</div>
+
+<script>
+let editingId = null;
+let currentRows = [];
+
+document.getElementById('signout').addEventListener('click', async () => {
+  await window.sb.auth.signOut();
+  window.location.href = '/login.html';
+});
+
+function dollars(n) {
+  return '$' + Number(n || 0).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+}
+
+function businessLabel(b) {
+  return b === 'dwm' ? 'DWM' : 'jreedconsults';
+}
+
+function enterEditMode(m) {
+  editingId = m.id;
+  document.getElementById('trip_date').value = m.trip_date;
+  document.getElementById('miles').value = m.miles;
+  document.getElementById('tolls').value = m.tolls || 0;
+  document.getElementById('business').value = m.business || 'jreedconsults';
+  document.getElementById('purpose').value = m.purpose || '';
+  document.getElementById('notes').value = m.notes || '';
+  document.getElementById('submit-btn').textContent = 'Update trip';
+  document.getElementById('cancel-btn').style.display = 'inline-block';
+  document.getElementById('form-heading').textContent = 'Edit trip';
+  window.scrollTo({ top: 0, behavior: 'smooth' });
+}
+
+function exitEditMode() {
+  editingId = null;
+  document.getElementById('trip-form').reset();
+  document.getElementById('trip_date').valueAsDate = new Date();
+  document.getElementById('tolls').value = 0;
+  document.getElementById('business').value = 'jreedconsults';
+  document.getElementById('submit-btn').textContent = 'Save trip';
+  document.getElementById('cancel-btn').style.display = 'none';
+  document.getElementById('form-heading').textContent = 'Add a trip';
+  document.getElementById('err').style.display = 'none';
+}
+
+document.getElementById('cancel-btn').addEventListener('click', exitEditMode);
+
+async function load() {
+  const r = await window.apiFetch('/api/mileage');
+  const tbody = document.getElementById('rows');
+  if (!r.ok) { tbody.innerHTML = '<tr><td colspan="7" class="error">Failed to load.</td></tr>'; return; }
+  currentRows = await r.json();
+  if (currentRows.length === 0) {
+    tbody.innerHTML = '<tr><td colspan="7" style="padding:18px;color:#999;">No trips yet.</td></tr>';
+    return;
+  }
+  tbody.innerHTML = currentRows.map(m => '<tr>' +
+    '<td>' + m.trip_date + '</td>' +
+    '<td>' + businessLabel(m.business) + '</td>' +
+    '<td>' + m.miles + '</td>' +
+    '<td>' + dollars(m.tolls || 0) + '</td>' +
+    '<td>' + (m.purpose || '—') + '</td>' +
+    '<td>' + (m.notes || '—') + '</td>' +
+    '<td style="white-space:nowrap;">' +
+      '<button class="btn-edit" data-id="' + m.id + '" style="background:transparent;border:0;color:#1b4332;cursor:pointer;padding:4px 8px;font-size:12px;text-transform:uppercase;letter-spacing:1px;">Edit</button>' +
+      '<button class="danger" data-id="' + m.id + '">Delete</button>' +
+    '</td></tr>').join('');
+  tbody.querySelectorAll('.btn-edit').forEach(btn => btn.addEventListener('click', () => {
+    const m = currentRows.find(x => x.id === btn.dataset.id);
+    if (m) enterEditMode(m);
+  }));
+  tbody.querySelectorAll('button.danger').forEach(btn => btn.addEventListener('click', async () => {
+    if (!confirm('Delete this trip?')) return;
+    await window.apiFetch('/api/mileage/' + btn.dataset.id, { method: 'DELETE' });
+    if (editingId === btn.dataset.id) exitEditMode();
+    load();
+  }));
+}
+
+document.getElementById('quickAtherton').addEventListener('click', () => {
+  document.getElementById('miles').value = 228;
+  document.getElementById('tolls').value = 17;
+  document.getElementById('business').value = 'jreedconsults';
+  document.getElementById('purpose').value = 'Atherton poker game (Bay Bridge + Carquinez tolls)';
+});
+
+document.getElementById('trip-form').addEventListener('submit', async (e) => {
+  e.preventDefault();
+  const body = {
+    trip_date: document.getElementById('trip_date').value,
+    miles: parseFloat(document.getElementById('miles').value),
+    tolls: parseFloat(document.getElementById('tolls').value) || 0,
+    business: document.getElementById('business').value,
+    purpose: document.getElementById('purpose').value || null,
+    notes: document.getElementById('notes').value || null
+  };
+  const url = editingId ? '/api/mileage/' + editingId : '/api/mileage';
+  const method = editingId ? 'PATCH' : 'POST';
+  const r = await window.apiFetch(url, { method, body: JSON.stringify(body) });
+  const err = document.getElementById('err');
+  if (!r.ok) {
+    const j = await r.json().catch(() => ({}));
+    err.textContent = j.error || 'Failed to save.';
+    err.style.display = 'block';
+    return;
+  }
+  err.style.display = 'none';
+  exitEditMode();
+  load();
+});
+
+(async function init() {
+  await window.authReady;
+  document.getElementById('trip_date').valueAsDate = new Date();
+  load();
+})();
+</script>
+</body>
+</html>

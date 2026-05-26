@@ -1,0 +1,47 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Sign In — J. Reed Consults</title>
+  <link rel="stylesheet" href="/styles.css">
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+  <script src="/supabase-config.js"></script>
+</head>
+<body>
+<div class="container" style="max-width:420px;margin-top:80px;">
+  <h1>J. Reed Consults</h1>
+  <p class="subtitle">Sign in to your dashboard</p>
+  <div class="card">
+    <form id="login-form">
+      <label for="email">Email</label>
+      <input id="email" type="email" required autocomplete="email">
+      <button class="primary" type="submit">Send magic link</button>
+      <p class="error" id="err" style="display:none"></p>
+      <p class="success" id="ok" style="display:none">Check your email for a sign-in link.</p>
+    </form>
+  </div>
+</div>
+<script>
+const sb = supabase.createClient(window.SUPABASE_URL, window.SUPABASE_ANON_KEY);
+document.getElementById('login-form').addEventListener('submit', async function (e) {
+  e.preventDefault();
+  const email = document.getElementById('email').value.trim();
+  const err = document.getElementById('err');
+  const ok = document.getElementById('ok');
+  err.style.display = 'none';
+  ok.style.display = 'none';
+  const { error } = await sb.auth.signInWithOtp({
+    email: email,
+    options: { emailRedirectTo: window.location.origin + '/auth-callback.html' }
+  });
+  if (error) {
+    err.textContent = error.message;
+    err.style.display = 'block';
+  } else {
+    ok.style.display = 'block';
+  }
+});
+</script>
+</body>
+</html>

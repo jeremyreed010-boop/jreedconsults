@@ -1,0 +1,183 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Partner Pay (DWM) — J. Reed Consults</title>
+  <link rel="stylesheet" href="/styles.css">
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+  <script src="/supabase-config.js"></script>
+  <script src="/auth-guard.js"></script>
+</head>
+<body>
+<header class="top">
+  <div class="inner">
+    <span class="brand">J. Reed Consults</span>
+    <nav>
+      <a href="/dashboard.html">Dashboard</a>
+      <a href="/games.html">Games</a>
+      <a href="/partner-pay.html" class="active">Partner Pay</a>
+      <a href="/mileage.html">Mileage</a>
+      <a href="/expenses.html">Expenses</a>
+      <a href="/taxes.html">Taxes</a>
+      <a href="/sep.html">SEP</a>
+      <a href="/pnl.html">P&amp;L</a>
+      <a href="/settings.html">Settings</a>
+    </nav>
+    <button class="signout" id="signout">Sign out</button>
+  </div>
+</header>
+
+<div class="container">
+  <h1>Partner Pay (DWM)</h1>
+  <p class="subtitle">Bi-weekly guaranteed payments from Drink With Me. Income for your K-1 / Schedule E.</p>
+
+  <div class="card">
+    <h2 style="margin-top:0;" id="form-heading">Add a payment</h2>
+    <form id="pp-form">
+      <div class="row">
+        <div>
+          <label for="pay_date">Pay date</label>
+          <input id="pay_date" type="date" required>
+        </div>
+        <div>
+          <label for="amount">Amount ($)</label>
+          <input id="amount" type="number" step="0.01" required>
+        </div>
+        <div>
+          <label for="paid">Received?</label>
+          <select id="paid">
+            <option value="true">Yes</option>
+            <option value="false">Not yet</option>
+          </select>
+        </div>
+        <div>
+          <label for="paid_date">Date received</label>
+          <input id="paid_date" type="date">
+        </div>
+      </div>
+      <div class="row" style="margin-top:10px;">
+        <div>
+          <label for="notes">Notes</label>
+          <input id="notes" type="text">
+        </div>
+      </div>
+      <button class="primary" type="submit" id="submit-btn">Save payment</button>
+      <button type="button" id="cancel-btn" style="display:none;margin-top:12px;margin-left:8px;padding:11px 22px;background:transparent;color:#5a6b5f;border:1px solid #d6d0bd;font:inherit;letter-spacing:2px;text-transform:uppercase;font-size:12px;cursor:pointer;">Cancel</button>
+      <p class="error" id="err" style="display:none"></p>
+    </form>
+  </div>
+
+  <h2>All payments</h2>
+  <div class="card" style="padding:0;">
+    <table>
+      <thead><tr>
+        <th>Pay date</th><th>Amount</th><th>Received?</th><th>Date received</th><th>Notes</th><th></th>
+      </tr></thead>
+      <tbody id="rows"><tr><td colspan="6" style="padding:18px;color:#999;">Loading…</td></tr></tbody>
+    </table>
+  </div>
+</div>
+
+<script>
+let editingId = null;
+let currentRows = [];
+
+document.getElementById('signout').addEventListener('click', async () => {
+  await window.sb.auth.signOut();
+  window.location.href = '/login.html';
+});
+
+function dollars(n) {
+  return '$' + Number(n || 0).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+}
+
+function enterEditMode(p) {
+  editingId = p.id;
+  document.getElementById('pay_date').value = p.pay_date;
+  document.getElementById('amount').value = p.amount;
+  document.getElementById('paid').value = p.paid ? 'true' : 'false';
+  document.getElementById('paid_date').value = p.paid_date || '';
+  document.getElementById('notes').value = p.notes || '';
+  document.getElementById('submit-btn').textContent = 'Update payment';
+  document.getElementById('cancel-btn').style.display = 'inline-block';
+  document.getElementById('form-heading').textContent = 'Edit payment';
+  window.scrollTo({ top: 0, behavior: 'smooth' });
+}
+
+function exitEditMode() {
+  editingId = null;
+  document.getElementById('pp-form').reset();
+  document.getElementById('pay_date').valueAsDate = new Date();
+  document.getElementById('paid').value = 'true';
+  document.getElementById('submit-btn').textContent = 'Save payment';
+  document.getElementById('cancel-btn').style.display = 'none';
+  document.getElementById('form-heading').textContent = 'Add a payment';
+  document.getElementById('err').style.display = 'none';
+}
+
+document.getElementById('cancel-btn').addEventListener('click', exitEditMode);
+
+async function load() {
+  const r = await window.apiFetch('/api/partner_pay');
+  const tbody = document.getElementById('rows');
+  if (!r.ok) { tbody.innerHTML = '<tr><td colspan="6" class="error">Failed to load.</td></tr>'; return; }
+  currentRows = await r.json();
+  if (currentRows.length === 0) {
+    tbody.innerHTML = '<tr><td colspan="6" style="padding:18px;color:#999;">No payments yet. Add your first above.</td></tr>';
+    return;
+  }
+  tbody.innerHTML = currentRows.map(p => '<tr>' +
+    '<td>' + p.pay_date + '</td>' +
+    '<td>' + dollars(p.amount) + '</td>' +
+    '<td>' + (p.paid ? 'Yes' : 'No') + '</td>' +
+    '<td>' + (p.paid_date || '—') + '</td>' +
+    '<td>' + (p.notes || '—') + '</td>' +
+    '<td style="white-space:nowrap;">' +
+      '<button class="btn-edit" data-id="' + p.id + '" style="background:transparent;border:0;color:#1b4332;cursor:pointer;padding:4px 8px;font-size:12px;text-transform:uppercase;letter-spacing:1px;">Edit</button>' +
+      '<button class="danger" data-id="' + p.id + '">Delete</button>' +
+    '</td></tr>').join('');
+  tbody.querySelectorAll('.btn-edit').forEach(btn => btn.addEventListener('click', () => {
+    const p = currentRows.find(x => x.id === btn.dataset.id);
+    if (p) enterEditMode(p);
+  }));
+  tbody.querySelectorAll('button.danger').forEach(btn => btn.addEventListener('click', async () => {
+    if (!confirm('Delete this payment?')) return;
+    await window.apiFetch('/api/partner_pay/' + btn.dataset.id, { method: 'DELETE' });
+    if (editingId === btn.dataset.id) exitEditMode();
+    load();
+  }));
+}
+
+document.getElementById('pp-form').addEventListener('submit', async (e) => {
+  e.preventDefault();
+  const body = {
+    pay_date: document.getElementById('pay_date').value,
+    amount: parseFloat(document.getElementById('amount').value),
+    paid: document.getElementById('paid').value === 'true',
+    paid_date: document.getElementById('paid_date').value || null,
+    notes: document.getElementById('notes').value || null
+  };
+  const url = editingId ? '/api/partner_pay/' + editingId : '/api/partner_pay';
+  const method = editingId ? 'PATCH' : 'POST';
+  const r = await window.apiFetch(url, { method, body: JSON.stringify(body) });
+  const err = document.getElementById('err');
+  if (!r.ok) {
+    const j = await r.json().catch(() => ({}));
+    err.textContent = j.error || 'Failed to save.';
+    err.style.display = 'block';
+    return;
+  }
+  err.style.display = 'none';
+  exitEditMode();
+  load();
+});
+
+(async function init() {
+  await window.authReady;
+  document.getElementById('pay_date').valueAsDate = new Date();
+  load();
+})();
+</script>
+</body>
+</html>

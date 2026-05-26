@@ -1,0 +1,194 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Games — J. Reed Consults</title>
+  <link rel="stylesheet" href="/styles.css">
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+  <script src="/supabase-config.js"></script>
+  <script src="/auth-guard.js"></script>
+</head>
+<body>
+<header class="top">
+  <div class="inner">
+    <span class="brand">J. Reed Consults</span>
+    <nav>
+      <a href="/dashboard.html">Dashboard</a>
+      <a href="/games.html" class="active">Games</a>
+      <a href="/partner-pay.html">Partner Pay</a>
+      <a href="/mileage.html">Mileage</a>
+      <a href="/expenses.html">Expenses</a>
+      <a href="/taxes.html">Taxes</a>
+      <a href="/sep.html">SEP</a>
+      <a href="/pnl.html">P&amp;L</a>
+      <a href="/settings.html">Settings</a>
+    </nav>
+    <button class="signout" id="signout">Sign out</button>
+  </div>
+</header>
+
+<div class="container">
+  <h1>Games</h1>
+  <p class="subtitle">Log each poker game (income).</p>
+
+  <div class="card">
+    <h2 style="margin-top:0;" id="form-heading">Add a game</h2>
+    <form id="game-form">
+      <div class="row">
+        <div>
+          <label for="game_date">Date</label>
+          <input id="game_date" type="date" required>
+        </div>
+        <div>
+          <label for="gross_amount">Amount ($)</label>
+          <input id="gross_amount" type="number" step="0.01" value="1000" required>
+        </div>
+        <div>
+          <label for="paid">Paid?</label>
+          <select id="paid"><option value="false">Not yet</option><option value="true">Paid</option></select>
+        </div>
+        <div>
+          <label for="paid_date">Paid date</label>
+          <input id="paid_date" type="date">
+        </div>
+      </div>
+      <div class="row" style="margin-top:10px;">
+        <div>
+          <label for="payment_method">Payment method</label>
+          <input id="payment_method" type="text" placeholder="Check, Venmo, etc.">
+        </div>
+        <div>
+          <label for="notes">Notes</label>
+          <input id="notes" type="text">
+        </div>
+      </div>
+      <button class="primary" type="submit" id="submit-btn">Save game</button>
+      <button type="button" id="cancel-btn" style="display:none;margin-top:12px;margin-left:8px;padding:11px 22px;background:transparent;color:#5a6b5f;border:1px solid #d6d0bd;font:inherit;letter-spacing:2px;text-transform:uppercase;font-size:12px;cursor:pointer;">Cancel</button>
+      <p class="error" id="err" style="display:none"></p>
+    </form>
+  </div>
+
+  <h2>All games</h2>
+  <div class="card" style="padding:0;">
+    <table>
+      <thead><tr>
+        <th>Date</th><th>Amount</th><th>Paid?</th><th>Paid date</th><th>Method</th><th>Notes</th><th></th>
+      </tr></thead>
+      <tbody id="rows"><tr><td colspan="7" style="padding:18px;color:#999;">Loading…</td></tr></tbody>
+    </table>
+  </div>
+</div>
+
+<script>
+let editingId = null;
+let currentRows = [];
+
+document.getElementById('signout').addEventListener('click', async function () {
+  await window.sb.auth.signOut();
+  window.location.href = '/login.html';
+});
+
+function dollars(n) {
+  return '$' + Number(n || 0).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+}
+
+function enterEditMode(g) {
+  editingId = g.id;
+  document.getElementById('game_date').value = g.game_date;
+  document.getElementById('gross_amount').value = g.gross_amount;
+  document.getElementById('paid').value = g.paid ? 'true' : 'false';
+  document.getElementById('paid_date').value = g.paid_date || '';
+  document.getElementById('payment_method').value = g.payment_method || '';
+  document.getElementById('notes').value = g.notes || '';
+  document.getElementById('submit-btn').textContent = 'Update game';
+  document.getElementById('cancel-btn').style.display = 'inline-block';
+  document.getElementById('form-heading').textContent = 'Edit game';
+  window.scrollTo({ top: 0, behavior: 'smooth' });
+}
+
+function exitEditMode() {
+  editingId = null;
+  document.getElementById('game-form').reset();
+  document.getElementById('gross_amount').value = 1000;
+  document.getElementById('game_date').valueAsDate = new Date();
+  document.getElementById('submit-btn').textContent = 'Save game';
+  document.getElementById('cancel-btn').style.display = 'none';
+  document.getElementById('form-heading').textContent = 'Add a game';
+  document.getElementById('err').style.display = 'none';
+}
+
+document.getElementById('cancel-btn').addEventListener('click', exitEditMode);
+
+async function load() {
+  const r = await window.apiFetch('/api/games');
+  const tbody = document.getElementById('rows');
+  if (!r.ok) { tbody.innerHTML = '<tr><td colspan="7" class="error">Failed to load.</td></tr>'; return; }
+  currentRows = await r.json();
+  if (currentRows.length === 0) {
+    tbody.innerHTML = '<tr><td colspan="7" style="padding:18px;color:#999;">No games yet. Add your first above.</td></tr>';
+    return;
+  }
+  tbody.innerHTML = currentRows.map(function (g) {
+    return '<tr>' +
+      '<td>' + g.game_date + '</td>' +
+      '<td>' + dollars(g.gross_amount) + '</td>' +
+      '<td>' + (g.paid ? 'Yes' : 'No') + '</td>' +
+      '<td>' + (g.paid_date || '—') + '</td>' +
+      '<td>' + (g.payment_method || '—') + '</td>' +
+      '<td>' + (g.notes || '—') + '</td>' +
+      '<td style="white-space:nowrap;">' +
+        '<button class="btn-edit" data-id="' + g.id + '" style="background:transparent;border:0;color:#1b4332;cursor:pointer;padding:4px 8px;font-size:12px;text-transform:uppercase;letter-spacing:1px;">Edit</button>' +
+        '<button class="danger" data-id="' + g.id + '">Delete</button>' +
+      '</td>' +
+      '</tr>';
+  }).join('');
+  tbody.querySelectorAll('.btn-edit').forEach(function (btn) {
+    btn.addEventListener('click', function () {
+      const g = currentRows.find(function (x) { return x.id === btn.dataset.id; });
+      if (g) enterEditMode(g);
+    });
+  });
+  tbody.querySelectorAll('button.danger').forEach(function (btn) {
+    btn.addEventListener('click', async function () {
+      if (!confirm('Delete this game?')) return;
+      await window.apiFetch('/api/games/' + btn.dataset.id, { method: 'DELETE' });
+      if (editingId === btn.dataset.id) exitEditMode();
+      load();
+    });
+  });
+}
+
+document.getElementById('game-form').addEventListener('submit', async function (e) {
+  e.preventDefault();
+  const body = {
+    game_date: document.getElementById('game_date').value,
+    gross_amount: parseFloat(document.getElementById('gross_amount').value),
+    paid: document.getElementById('paid').value === 'true',
+    paid_date: document.getElementById('paid_date').value || null,
+    payment_method: document.getElementById('payment_method').value || null,
+    notes: document.getElementById('notes').value || null
+  };
+  const url = editingId ? '/api/games/' + editingId : '/api/games';
+  const method = editingId ? 'PATCH' : 'POST';
+  const r = await window.apiFetch(url, { method: method, body: JSON.stringify(body) });
+  const err = document.getElementById('err');
+  if (!r.ok) {
+    const j = await r.json().catch(function () { return {}; });
+    err.textContent = j.error || 'Failed to save.';
+    err.style.display = 'block';
+    return;
+  }
+  err.style.display = 'none';
+  exitEditMode();
+  load();
+});
+
+(async function init() {
+  await window.authReady;
+  document.getElementById('game_date').valueAsDate = new Date();
+  load();
+})();
+</script>
+</body>
+</html>

@@ -1,0 +1,215 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Tax Payments — J. Reed Consults</title>
+  <link rel="stylesheet" href="/styles.css">
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+  <script src="/supabase-config.js"></script>
+  <script src="/auth-guard.js"></script>
+</head>
+<body>
+<header class="top">
+  <div class="inner">
+    <span class="brand">J. Reed Consults</span>
+    <nav>
+      <a href="/dashboard.html">Dashboard</a>
+      <a href="/games.html">Games</a>
+      <a href="/partner-pay.html">Partner Pay</a>
+      <a href="/mileage.html">Mileage</a>
+      <a href="/expenses.html">Expenses</a>
+      <a href="/taxes.html" class="active">Taxes</a>
+      <a href="/sep.html">SEP</a>
+      <a href="/pnl.html">P&amp;L</a>
+      <a href="/settings.html">Settings</a>
+    </nav>
+    <button class="signout" id="signout">Sign out</button>
+  </div>
+</header>
+
+<div class="container">
+  <h1>Tax Payments</h1>
+  <p class="subtitle">Quarterly estimated tax payments (Federal 1040-ES + CA FTB 540-ES). These prepay what you owe at filing — log each one as you make it.</p>
+
+  <div class="card">
+    <h2 style="margin-top:0;" id="form-heading">Add a payment</h2>
+    <form id="tax-form">
+      <div class="row">
+        <div>
+          <label for="payment_date">Payment date</label>
+          <input id="payment_date" type="date" required>
+        </div>
+        <div>
+          <label for="amount">Amount ($)</label>
+          <input id="amount" type="number" step="0.01" required>
+        </div>
+        <div>
+          <label for="jurisdiction">Jurisdiction</label>
+          <select id="jurisdiction" required>
+            <option value="federal">Federal (IRS)</option>
+            <option value="state">State (CA FTB)</option>
+          </select>
+        </div>
+        <div>
+          <label for="tax_year">Tax year</label>
+          <input id="tax_year" type="number" required>
+        </div>
+      </div>
+      <div class="row" style="margin-top:10px;">
+        <div>
+          <label for="quarter">Quarter</label>
+          <select id="quarter">
+            <option value="">N/A</option>
+            <option value="1">Q1 (due Apr 15)</option>
+            <option value="2">Q2 (due Jun 15)</option>
+            <option value="3">Q3 (due Sep 15)</option>
+            <option value="4">Q4 (due Jan 15)</option>
+          </select>
+        </div>
+        <div>
+          <label for="confirmation">Confirmation #</label>
+          <input id="confirmation" type="text" placeholder="EFTPS / FTB ref">
+        </div>
+        <div>
+          <label for="notes">Notes</label>
+          <input id="notes" type="text">
+        </div>
+      </div>
+      <button class="primary" type="submit" id="submit-btn">Save payment</button>
+      <button type="button" id="cancel-btn" style="display:none;margin-top:12px;margin-left:8px;padding:11px 22px;background:transparent;color:#5a6b5f;border:1px solid #d6d0bd;font:inherit;letter-spacing:2px;text-transform:uppercase;font-size:12px;cursor:pointer;">Cancel</button>
+      <p class="error" id="err" style="display:none"></p>
+    </form>
+  </div>
+
+  <h2>All payments</h2>
+  <div class="card" style="padding:0;">
+    <table>
+      <thead><tr>
+        <th>Date</th><th>Year</th><th>Qtr</th><th>Jurisdiction</th><th>Amount</th><th>Confirmation</th><th>Notes</th><th></th>
+      </tr></thead>
+      <tbody id="rows"><tr><td colspan="8" style="padding:18px;color:#999;">Loading…</td></tr></tbody>
+    </table>
+  </div>
+</div>
+
+<script>
+let editingId = null;
+let currentRows = [];
+
+document.getElementById('signout').addEventListener('click', async function () {
+  await window.sb.auth.signOut();
+  window.location.href = '/login.html';
+});
+
+function dollars(n) {
+  return '$' + Number(n || 0).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+}
+
+function jurisdictionLabel(j) {
+  return j === 'federal' ? 'Federal' : (j === 'state' ? 'State (CA)' : j);
+}
+
+function enterEditMode(p) {
+  editingId = p.id;
+  document.getElementById('payment_date').value = p.payment_date;
+  document.getElementById('amount').value = p.amount;
+  document.getElementById('jurisdiction').value = p.jurisdiction;
+  document.getElementById('tax_year').value = p.tax_year;
+  document.getElementById('quarter').value = p.quarter || '';
+  document.getElementById('confirmation').value = p.confirmation || '';
+  document.getElementById('notes').value = p.notes || '';
+  document.getElementById('submit-btn').textContent = 'Update payment';
+  document.getElementById('cancel-btn').style.display = 'inline-block';
+  document.getElementById('form-heading').textContent = 'Edit payment';
+  window.scrollTo({ top: 0, behavior: 'smooth' });
+}
+
+function exitEditMode() {
+  editingId = null;
+  document.getElementById('tax-form').reset();
+  document.getElementById('payment_date').valueAsDate = new Date();
+  document.getElementById('tax_year').value = new Date().getFullYear();
+  document.getElementById('submit-btn').textContent = 'Save payment';
+  document.getElementById('cancel-btn').style.display = 'none';
+  document.getElementById('form-heading').textContent = 'Add a payment';
+  document.getElementById('err').style.display = 'none';
+}
+
+document.getElementById('cancel-btn').addEventListener('click', exitEditMode);
+
+async function load() {
+  const r = await window.apiFetch('/api/tax_payments');
+  const tbody = document.getElementById('rows');
+  if (!r.ok) { tbody.innerHTML = '<tr><td colspan="8" class="error">Failed to load.</td></tr>'; return; }
+  currentRows = await r.json();
+  if (currentRows.length === 0) {
+    tbody.innerHTML = '<tr><td colspan="8" style="padding:18px;color:#999;">No payments yet. Add your first above.</td></tr>';
+    return;
+  }
+  tbody.innerHTML = currentRows.map(function (p) {
+    return '<tr>' +
+      '<td>' + p.payment_date + '</td>' +
+      '<td>' + p.tax_year + '</td>' +
+      '<td>' + (p.quarter ? 'Q' + p.quarter : '—') + '</td>' +
+      '<td>' + jurisdictionLabel(p.jurisdiction) + '</td>' +
+      '<td>' + dollars(p.amount) + '</td>' +
+      '<td>' + (p.confirmation || '—') + '</td>' +
+      '<td>' + (p.notes || '—') + '</td>' +
+      '<td style="white-space:nowrap;">' +
+        '<button class="btn-edit" data-id="' + p.id + '" style="background:transparent;border:0;color:#1b4332;cursor:pointer;padding:4px 8px;font-size:12px;text-transform:uppercase;letter-spacing:1px;">Edit</button>' +
+        '<button class="danger" data-id="' + p.id + '">Delete</button>' +
+      '</td>' +
+      '</tr>';
+  }).join('');
+  tbody.querySelectorAll('.btn-edit').forEach(function (btn) {
+    btn.addEventListener('click', function () {
+      const p = currentRows.find(function (x) { return x.id === btn.dataset.id; });
+      if (p) enterEditMode(p);
+    });
+  });
+  tbody.querySelectorAll('button.danger').forEach(function (btn) {
+    btn.addEventListener('click', async function () {
+      if (!confirm('Delete this payment?')) return;
+      await window.apiFetch('/api/tax_payments/' + btn.dataset.id, { method: 'DELETE' });
+      if (editingId === btn.dataset.id) exitEditMode();
+      load();
+    });
+  });
+}
+
+document.getElementById('tax-form').addEventListener('submit', async function (e) {
+  e.preventDefault();
+  const body = {
+    payment_date: document.getElementById('payment_date').value,
+    amount: parseFloat(document.getElementById('amount').value),
+    jurisdiction: document.getElementById('jurisdiction').value,
+    tax_year: parseInt(document.getElementById('tax_year').value, 10),
+    quarter: document.getElementById('quarter').value ? parseInt(document.getElementById('quarter').value, 10) : null,
+    confirmation: document.getElementById('confirmation').value || null,
+    notes: document.getElementById('notes').value || null
+  };
+  const url = editingId ? '/api/tax_payments/' + editingId : '/api/tax_payments';
+  const method = editingId ? 'PATCH' : 'POST';
+  const r = await window.apiFetch(url, { method: method, body: JSON.stringify(body) });
+  const err = document.getElementById('err');
+  if (!r.ok) {
+    const j = await r.json().catch(function () { return {}; });
+    err.textContent = j.error || 'Failed to save.';
+    err.style.display = 'block';
+    return;
+  }
+  err.style.display = 'none';
+  exitEditMode();
+  load();
+});
+
+(async function init() {
+  await window.authReady;
+  document.getElementById('payment_date').valueAsDate = new Date();
+  document.getElementById('tax_year').value = new Date().getFullYear();
+  load();
+})();
+</script>
+</body>
+</html>

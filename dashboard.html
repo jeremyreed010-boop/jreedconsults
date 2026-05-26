@@ -1,0 +1,273 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Dashboard — J. Reed Consults</title>
+  <link rel="stylesheet" href="/styles.css">
+  <style>
+    .hero {
+      background: linear-gradient(135deg, #1b4332 0%, #2d5a40 100%);
+      color: #f5ecd5;
+      padding: 24px 28px;
+      border-left: 4px solid #c9a961;
+      margin-bottom: 24px;
+    }
+    .hero .hero-label {
+      font-size: 11px;
+      letter-spacing: 2.5px;
+      text-transform: uppercase;
+      color: #c9a961;
+      margin-bottom: 6px;
+    }
+    .hero .hero-value {
+      font-size: 38px;
+      font-weight: 300;
+      color: #fff;
+      letter-spacing: 1px;
+    }
+    .hero .hero-sub {
+      font-size: 13px;
+      color: #d4cba4;
+      margin-top: 6px;
+    }
+    .hero-row {
+      display: flex;
+      gap: 24px;
+      flex-wrap: wrap;
+      align-items: flex-start;
+    }
+    .hero-row > div { flex: 1; min-width: 200px; }
+    .hero-setaside {
+      border-left: 1px solid #5a7560;
+      padding-left: 24px;
+    }
+    .hero-setaside .hero-value { font-size: 28px; }
+
+    .pace-table { width: 100%; border-collapse: collapse; margin-top: 12px; }
+    .pace-table th, .pace-table td { padding: 10px 8px; font-size: 14px; }
+    .pace-table th { background: #f4ead2; color: #1b4332; font-size: 11px; text-transform: uppercase; letter-spacing: 1px; text-align: left; font-weight: 600; }
+    .pace-table td { border-bottom: 1px solid #ece5cf; }
+    .pace-table td.amount { text-align: right; font-variant-numeric: tabular-nums; }
+    .pace-table .badge { display: inline-block; padding: 2px 8px; font-size: 10px; letter-spacing: 1px; text-transform: uppercase; font-weight: 600; border-radius: 2px; }
+    .badge-ontrack { background: #d4e8d4; color: #2d5a40; }
+    .badge-short   { background: #f4d4d4; color: #8b3a3a; }
+    .badge-upcoming { background: #f0e8d0; color: #7a6a3a; }
+    .pace-past { color: #5a6b5f; }
+  </style>
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+  <script src="/supabase-config.js"></script>
+  <script src="/auth-guard.js"></script>
+</head>
+<body>
+<header class="top">
+  <div class="inner">
+    <span class="brand">J. Reed Consults</span>
+    <nav>
+      <a href="/dashboard.html" class="active">Dashboard</a>
+      <a href="/games.html">Games</a>
+      <a href="/partner-pay.html">Partner Pay</a>
+      <a href="/mileage.html">Mileage</a>
+      <a href="/expenses.html">Expenses</a>
+      <a href="/taxes.html">Taxes</a>
+      <a href="/sep.html">SEP</a>
+      <a href="/pnl.html">P&amp;L</a>
+      <a href="/settings.html">Settings</a>
+    </nav>
+    <button class="signout" id="signout">Sign out</button>
+  </div>
+</header>
+
+<div class="container">
+  <h1>Dashboard</h1>
+  <p class="subtitle">Year-to-date · full-year projection</p>
+
+  <div class="row" style="margin-bottom:18px;">
+    <div>
+      <label for="year">Tax year</label>
+      <select id="year"></select>
+    </div>
+    <div>
+      <label for="business">Business</label>
+      <select id="business">
+        <option value="combined">Combined</option>
+        <option value="jreedconsults">jreedconsults (LLC)</option>
+        <option value="dwm">DWM (K-1)</option>
+      </select>
+    </div>
+  </div>
+
+  <div id="hero"></div>
+
+  <h2>Income &amp; Deductions <span id="biz-label" style="font-weight:400;color:#7a8a7e;text-transform:none;letter-spacing:0;font-size:13px;"></span></h2>
+  <div class="stat-grid" id="biz-stats"></div>
+
+  <h2 style="margin-top:32px;">Tax Planning <span style="font-weight:400;color:#7a8a7e;text-transform:none;letter-spacing:0;font-size:13px;">(combined — IRS sees one return)</span></h2>
+  <div class="stat-grid" id="tax-stats"></div>
+
+  <h2 style="margin-top:32px;">Per-Quarter Pace</h2>
+  <div class="card" style="padding:0;">
+    <table class="pace-table">
+      <thead><tr>
+        <th>Quarter</th><th>Due</th><th style="text-align:right;">Target cumulative</th><th style="text-align:right;">Paid cumulative</th><th style="text-align:right;">Gap</th><th>Status</th>
+      </tr></thead>
+      <tbody id="pace-rows"></tbody>
+    </table>
+  </div>
+
+  <p class="subtitle" style="font-size:11px;margin-top:24px;">
+    Tax estimate uses simplified 2026 federal + CA brackets and assumes business income is your only taxable income. Treat as planning rough estimate, not tax advice — confirm with a CPA. Configure annual targets, filing status, and prior-year tax on <a href="/settings.html" style="color:#1b4332;">Settings</a> to enable full-year projection and safe harbor.
+  </p>
+</div>
+
+<script>
+document.getElementById('signout').addEventListener('click', async () => {
+  await window.sb.auth.signOut();
+  window.location.href = '/login.html';
+});
+
+function dollars(n) {
+  return '$' + Number(n || 0).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+}
+function dollarsRound(n) {
+  return '$' + Math.round(Number(n || 0)).toLocaleString('en-US');
+}
+
+function renderStats(stats) {
+  return stats.map(x => '<div class="stat"><div class="label">' + x.label + '</div>' +
+    '<div class="value">' + x.value + '</div>' +
+    (x.sub ? '<div class="sub">' + x.sub + '</div>' : '') + '</div>').join('');
+}
+
+const BIZ_LABELS = {
+  combined: 'Combined (both businesses)',
+  jreedconsults: 'jreedconsults LLC (Schedule C)',
+  dwm: 'DWM (K-1 / Schedule E UPE)'
+};
+
+function renderHero(s) {
+  let leftHtml;
+  if (s.recommended_due_date) {
+    const due = new Date(s.recommended_due_date);
+    const days = Math.ceil((due - new Date()) / 86400000);
+    const qLabel = 'Q' + s.recommended_quarter;
+    leftHtml =
+      '<div class="hero-label">Recommended ' + qLabel + ' payment</div>' +
+      '<div class="hero-value">' + dollarsRound(s.recommended_next_payment) + '</div>' +
+      '<div class="hero-sub">Pay by ' + s.recommended_due_date + ' (' + days + ' day' + (days === 1 ? '' : 's') + ' away)</div>' +
+      (s.using_projection ? '' : '<div class="hero-sub" style="color:#e8b563;margin-top:8px;">⚠ Using YTD only — set annual income targets in <a href="/settings.html" style="color:#c9a961;">Settings</a> to enable real full-year projection.</div>');
+  } else {
+    leftHtml =
+      '<div class="hero-label">All quarterly deadlines passed</div>' +
+      '<div class="hero-value">' + dollarsRound(Math.max(0, s.projected_total_tax - s.total_taxes_paid)) + '</div>' +
+      '<div class="hero-sub">Remaining tax estimated above</div>';
+  }
+
+  let rightHtml = '';
+  if (s.set_aside_pct > 0) {
+    rightHtml =
+      '<div class="hero-setaside">' +
+        '<div class="hero-label">Set aside per dollar</div>' +
+        '<div class="hero-value">' + Math.round(s.set_aside_pct * 100) + '%</div>' +
+        '<div class="hero-sub">of every game payment or partner-pay deposit, banked toward taxes</div>' +
+      '</div>';
+  }
+
+  document.getElementById('hero').innerHTML =
+    '<div class="hero"><div class="hero-row"><div>' + leftHtml + '</div>' + rightHtml + '</div></div>';
+}
+
+function renderPace(pace) {
+  document.getElementById('pace-rows').innerHTML = pace.map(q => {
+    let badge;
+    if (!q.is_past) {
+      badge = '<span class="badge badge-upcoming">Upcoming</span>';
+    } else if (q.on_track) {
+      badge = '<span class="badge badge-ontrack">✓ On track</span>';
+    } else {
+      badge = '<span class="badge badge-short">✗ Short ' + dollarsRound(q.gap) + '</span>';
+    }
+    const cls = q.is_past ? '' : ' style="color:#5a6b5f;"';
+    return '<tr' + cls + '>' +
+      '<td>Q' + q.quarter + '</td>' +
+      '<td>' + q.due_date + '</td>' +
+      '<td class="amount">' + dollars(q.target_cumulative) + '</td>' +
+      '<td class="amount">' + dollars(q.paid_cumulative) + '</td>' +
+      '<td class="amount">' + (q.gap > 0 ? dollars(q.gap) : '—') + '</td>' +
+      '<td>' + badge + '</td>' +
+    '</tr>';
+  }).join('');
+}
+
+async function load() {
+  const year = document.getElementById('year').value;
+  const business = document.getElementById('business').value;
+  const r = await window.apiFetch('/api/summary?year=' + year + '&business=' + business);
+  if (!r.ok) {
+    document.getElementById('biz-stats').innerHTML = '<p class="error">Failed to load.</p>';
+    return;
+  }
+  const s = await r.json();
+
+  document.getElementById('biz-label').textContent = '— ' + BIZ_LABELS[business];
+
+  renderHero(s);
+
+  const incomeLabel =
+    business === 'dwm' ? 'Partner pay received' :
+    business === 'jreedconsults' ? 'Games income' : 'Total income';
+  const incomeSub =
+    business === 'jreedconsults' ? s.game_count + ' games · ' + dollars(s.collected_income) + ' collected' :
+    business === 'dwm' ? s.partner_pay_count + ' payments · ' + dollars(s.collected_income) + ' received' :
+    s.game_count + ' games + ' + s.partner_pay_count + ' partner payments';
+
+  const bizStats = [
+    { label: incomeLabel, value: dollars(s.gross_income), sub: incomeSub },
+    { label: 'Mileage deduction', value: dollars(s.mileage_deduction), sub: Number(s.total_miles || 0).toLocaleString() + ' mi @ $' + Number(s.mileage_rate).toFixed(3) },
+    { label: 'Tolls', value: dollars(s.total_tolls), sub: '' },
+    { label: 'Home office', value: dollars(s.home_office_deduction), sub: '' },
+    { label: 'Cell phone', value: dollars(s.cell_deduction), sub: '' },
+    { label: 'Internet', value: dollars(s.internet_deduction), sub: '' },
+    { label: 'Other expenses', value: dollars(s.other_expenses), sub: '' },
+    { label: 'Total deductions', value: dollars(s.total_deductions), sub: '' },
+    { label: 'Net income (YTD)', value: dollars(s.estimated_net), sub: 'Gross − deductions' }
+  ];
+  document.getElementById('biz-stats').innerHTML = renderStats(bizStats);
+
+  const projectedLabel = s.using_projection ? '(full year projected)' : '(YTD only — set targets in Settings)';
+  const safeHarborStat = s.safe_harbor_floor != null
+    ? { label: 'Safe harbor floor', value: dollars(s.safe_harbor_floor), sub: 'Min to pay to avoid penalty' }
+    : { label: 'Safe harbor floor', value: '—', sub: 'Set prior-year tax in Settings' };
+
+  const taxStats = [
+    { label: 'Projected income ' + projectedLabel, value: dollars(s.projected_total_income), sub: 'SE: ' + dollars(s.projected_income) + ' · W-2: ' + dollars(s.projected_w2_income) },
+    { label: 'Projected net SE', value: dollars(s.projected_net_se), sub: 'After SE deductions' },
+    { label: 'Projected total tax', value: dollars(s.projected_total_tax), sub: 'SE ' + dollars(s.projected_se_tax) + ' · Fed ' + dollars(s.projected_fed_tax) + ' · CA ' + dollars(s.projected_ca_tax) },
+    safeHarborStat,
+    { label: 'Total tax credits', value: dollars(s.total_credits), sub: 'W-2 W/H: ' + dollars(s.projected_w2_withholding) + ' · Estimates: ' + dollars(s.total_taxes_paid) },
+    { label: 'Remaining to pay (FY)', value: dollars(s.remaining_full_year), sub: 'Projected tax − credits' },
+    { label: 'Combined net SE (YTD)', value: dollars(s.combined_net_se), sub: 'Actual so far' },
+    { label: 'SEP IRA contributed', value: dollars(s.sep_contributed), sub: 'Room left: ' + dollars(s.sep_remaining) }
+  ];
+  document.getElementById('tax-stats').innerHTML = renderStats(taxStats);
+
+  renderPace(s.quarterly_pace || []);
+}
+
+(async function init() {
+  await window.authReady;
+  const sel = document.getElementById('year');
+  const thisYear = new Date().getFullYear();
+  for (let y = thisYear; y >= thisYear - 3; y--) {
+    const o = document.createElement('option');
+    o.value = y; o.textContent = y;
+    sel.appendChild(o);
+  }
+  sel.value = thisYear;
+  sel.addEventListener('change', load);
+  document.getElementById('business').addEventListener('change', load);
+  load();
+})();
+</script>
+</body>
+</html>

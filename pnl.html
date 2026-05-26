@@ -1,0 +1,168 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>P&amp;L — J. Reed Consults</title>
+  <link rel="stylesheet" href="/styles.css">
+  <style>
+    .pnl-section { background:#fff; border:1px solid #e8e2d0; border-left:3px solid #c9a961; padding:30px; margin-bottom:24px; }
+    .pnl-section h2 { margin-top:0; }
+    .pnl-table { width:100%; border-collapse:collapse; margin-top:8px; }
+    .pnl-table td { padding:8px 4px; border-bottom:1px solid #f0eada; font-size:14px; }
+    .pnl-table td.amount { text-align:right; font-variant-numeric:tabular-nums; }
+    .pnl-table tr.subtotal td { font-weight:600; border-top:1px solid #c9a961; padding-top:12px; }
+    .pnl-table tr.total td { font-weight:700; font-size:16px; color:#1b4332; border-top:2px solid #1b4332; padding-top:14px; }
+    .pnl-table tr.indent td:first-child { padding-left:24px; color:#5a6b5f; }
+    .print-only { display:none; }
+    @media print {
+      header.top, .controls, .actions, .print-hide { display:none !important; }
+      .container { max-width:100%; padding:0; }
+      body { background:#fff; }
+      .pnl-section { border:none; box-shadow:none; page-break-inside:avoid; padding:0; }
+      .print-only { display:block; }
+    }
+  </style>
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+  <script src="/supabase-config.js"></script>
+  <script src="/auth-guard.js"></script>
+</head>
+<body>
+<header class="top">
+  <div class="inner">
+    <span class="brand">J. Reed Consults</span>
+    <nav>
+      <a href="/dashboard.html">Dashboard</a>
+      <a href="/games.html">Games</a>
+      <a href="/partner-pay.html">Partner Pay</a>
+      <a href="/mileage.html">Mileage</a>
+      <a href="/expenses.html">Expenses</a>
+      <a href="/taxes.html">Taxes</a>
+      <a href="/sep.html">SEP</a>
+      <a href="/pnl.html" class="active">P&amp;L</a>
+      <a href="/settings.html">Settings</a>
+    </nav>
+    <button class="signout" id="signout">Sign out</button>
+  </div>
+</header>
+
+<div class="container">
+  <h1>Year-End P&amp;L</h1>
+  <p class="subtitle print-hide">For your accountant. Pick a year, then "Print" to save as PDF (Cmd/Ctrl-P).</p>
+
+  <div class="controls print-hide" style="margin-bottom:24px;">
+    <div class="row">
+      <div>
+        <label for="year">Tax year</label>
+        <select id="year"></select>
+      </div>
+      <div style="flex:2">
+        <label>&nbsp;</label>
+        <button class="primary" type="button" onclick="window.print()" style="margin-top:0;">Print / Save PDF</button>
+      </div>
+    </div>
+  </div>
+
+  <div id="report"></div>
+</div>
+
+<script>
+document.getElementById('signout').addEventListener('click', async () => {
+  await window.sb.auth.signOut();
+  window.location.href = '/login.html';
+});
+
+function dollars(n) {
+  return '$' + Number(n || 0).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+}
+
+function renderBusinessSection(name, tagline, s, expenseRows) {
+  let expCategoryRows = '';
+  if (expenseRows.length > 0) {
+    const byCat = {};
+    expenseRows.forEach(e => {
+      const cat = e.category || 'Other';
+      byCat[cat] = (byCat[cat] || 0) + Number(e.amount) * Number(e.business_pct) / 100;
+    });
+    Object.keys(byCat).sort().forEach(cat => {
+      expCategoryRows += '<tr class="indent"><td>' + cat + '</td><td class="amount">' + dollars(byCat[cat]) + '</td></tr>';
+    });
+  }
+
+  return '<div class="pnl-section">' +
+    '<h2>' + name + '</h2>' +
+    '<p class="subtitle" style="margin-top:-6px;">' + tagline + '</p>' +
+    '<table class="pnl-table">' +
+      '<tr><td colspan="2" style="padding-top:14px;font-weight:600;text-transform:uppercase;letter-spacing:1.5px;font-size:12px;color:#2d5a40;">Income</td></tr>' +
+      (s.game_count > 0 ? '<tr class="indent"><td>Games (' + s.game_count + ')</td><td class="amount">' + dollars(s.gross_income) + '</td></tr>' : '') +
+      (s.partner_pay_count > 0 ? '<tr class="indent"><td>Partner pay (' + s.partner_pay_count + ' payments)</td><td class="amount">' + dollars(s.gross_income) + '</td></tr>' : '') +
+      (s.game_count === 0 && s.partner_pay_count === 0 ? '<tr class="indent"><td>(none)</td><td class="amount">' + dollars(0) + '</td></tr>' : '') +
+      '<tr class="subtotal"><td>Total income</td><td class="amount">' + dollars(s.gross_income) + '</td></tr>' +
+      '<tr><td colspan="2" style="padding-top:18px;font-weight:600;text-transform:uppercase;letter-spacing:1.5px;font-size:12px;color:#2d5a40;">Deductions</td></tr>' +
+      '<tr class="indent"><td>Mileage (' + Number(s.total_miles).toLocaleString() + ' mi @ $' + Number(s.mileage_rate).toFixed(3) + ')</td><td class="amount">' + dollars(s.mileage_deduction) + '</td></tr>' +
+      (s.total_tolls > 0 ? '<tr class="indent"><td>Tolls</td><td class="amount">' + dollars(s.total_tolls) + '</td></tr>' : '') +
+      (s.home_office_deduction > 0 ? '<tr class="indent"><td>Home office</td><td class="amount">' + dollars(s.home_office_deduction) + '</td></tr>' : '') +
+      (s.cell_deduction > 0 ? '<tr class="indent"><td>Cell phone</td><td class="amount">' + dollars(s.cell_deduction) + '</td></tr>' : '') +
+      (s.internet_deduction > 0 ? '<tr class="indent"><td>Internet</td><td class="amount">' + dollars(s.internet_deduction) + '</td></tr>' : '') +
+      expCategoryRows +
+      '<tr class="subtotal"><td>Total deductions</td><td class="amount">' + dollars(s.total_deductions) + '</td></tr>' +
+      '<tr class="total"><td>Net income</td><td class="amount">' + dollars(s.estimated_net) + '</td></tr>' +
+    '</table>' +
+  '</div>';
+}
+
+async function load() {
+  const year = document.getElementById('year').value;
+  const [jrcRes, dwmRes, expRes] = await Promise.all([
+    window.apiFetch('/api/summary?year=' + year + '&business=jreedconsults'),
+    window.apiFetch('/api/summary?year=' + year + '&business=dwm'),
+    window.apiFetch('/api/expenses')
+  ]);
+  const jrc = await jrcRes.json();
+  const dwm = await dwmRes.json();
+  const allExp = await expRes.json();
+  const yearStart = year + '-01-01';
+  const yearEnd = year + '-12-31';
+  const expInYear = allExp.filter(e => e.expense_date >= yearStart && e.expense_date <= yearEnd);
+  const expJrc = expInYear.filter(e => e.business === 'jreedconsults');
+  const expDwm = expInYear.filter(e => e.business === 'dwm');
+
+  const report = document.getElementById('report');
+  report.innerHTML =
+    '<h2 style="text-align:center;margin-top:0;">Year ' + year + '</h2>' +
+    renderBusinessSection('J. Reed Consults LLC', 'Schedule C (Sole proprietor / disregarded entity)', jrc, expJrc) +
+    renderBusinessSection('DWM — Unreimbursed Partner Expenses', 'For Schedule E. Income shown is partner pay received; reconcile with K-1 line 4 at year-end.', dwm, expDwm) +
+    '<div class="pnl-section"><h2>Personal Tax Summary (combined)</h2>' +
+      '<table class="pnl-table">' +
+        '<tr><td>Combined net SE income</td><td class="amount">' + dollars(jrc.combined_net_se) + '</td></tr>' +
+        '<tr><td>Estimated SE tax (15.3% × 92.35%)</td><td class="amount">' + dollars(jrc.estimated_se_tax) + '</td></tr>' +
+        '<tr><td>Estimated federal tax</td><td class="amount">' + dollars(jrc.estimated_fed_tax) + '</td></tr>' +
+        '<tr><td>Estimated CA tax</td><td class="amount">' + dollars(jrc.estimated_ca_tax) + '</td></tr>' +
+        '<tr class="subtotal"><td>Estimated total tax liability</td><td class="amount">' + dollars(jrc.estimated_total_tax) + '</td></tr>' +
+        '<tr class="indent"><td>Federal payments made</td><td class="amount">' + dollars(jrc.federal_taxes_paid) + '</td></tr>' +
+        '<tr class="indent"><td>State (CA) payments made</td><td class="amount">' + dollars(jrc.state_taxes_paid) + '</td></tr>' +
+        '<tr class="subtotal"><td>Total estimated taxes paid</td><td class="amount">' + dollars(jrc.total_taxes_paid) + '</td></tr>' +
+        '<tr class="total"><td>Estimated remaining tax owed</td><td class="amount">' + dollars(jrc.remaining_tax_owed) + '</td></tr>' +
+        '<tr><td style="padding-top:18px;">SEP IRA contributed</td><td class="amount" style="padding-top:18px;">' + dollars(jrc.sep_contributed) + '</td></tr>' +
+        '<tr class="indent"><td>SEP room remaining</td><td class="amount">' + dollars(jrc.sep_remaining) + '</td></tr>' +
+      '</table>' +
+      '<p class="subtitle" style="font-size:11px;margin-top:18px;">Tax estimate uses simplified 2026 brackets (' + jrc.filing_status + ' filer) and assumes business income is your only taxable income. Treat as planning rough estimate, not tax advice.</p>' +
+    '</div>';
+}
+
+(async function init() {
+  await window.authReady;
+  const sel = document.getElementById('year');
+  const thisYear = new Date().getFullYear();
+  for (let y = thisYear; y >= thisYear - 3; y--) {
+    const o = document.createElement('option');
+    o.value = y; o.textContent = y;
+    sel.appendChild(o);
+  }
+  sel.value = thisYear;
+  sel.addEventListener('change', load);
+  load();
+})();
+</script>
+</body>
+</html>

@@ -1,0 +1,249 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Settings — J. Reed Consults</title>
+  <link rel="stylesheet" href="/styles.css">
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+  <script src="/supabase-config.js"></script>
+  <script src="/auth-guard.js"></script>
+</head>
+<body>
+<header class="top">
+  <div class="inner">
+    <span class="brand">J. Reed Consults</span>
+    <nav>
+      <a href="/dashboard.html">Dashboard</a>
+      <a href="/games.html">Games</a>
+      <a href="/partner-pay.html">Partner Pay</a>
+      <a href="/mileage.html">Mileage</a>
+      <a href="/expenses.html">Expenses</a>
+      <a href="/taxes.html">Taxes</a>
+      <a href="/sep.html">SEP</a>
+      <a href="/pnl.html">P&amp;L</a>
+      <a href="/settings.html" class="active">Settings</a>
+    </nav>
+    <button class="signout" id="signout">Sign out</button>
+  </div>
+</header>
+
+<div class="container">
+  <h1>Settings</h1>
+  <p class="subtitle">Recurring config. Feeds the Dashboard and P&amp;L calculations. Defaults to 75% DWM / 25% jreedconsults for shared items.</p>
+
+  <form id="settings-form">
+    <div class="card">
+      <h2 style="margin-top:0;">IRS mileage rate</h2>
+      <div class="row">
+        <div>
+          <label for="irs_mileage_rate">Rate ($/mile)</label>
+          <input id="irs_mileage_rate" type="number" step="0.001" required>
+          <p class="subtitle" style="font-size:11px;margin-top:6px;">2026 = $0.725 (IRS Notice 2026-10). Update each January.</p>
+        </div>
+      </div>
+    </div>
+
+    <div class="card">
+      <h2 style="margin-top:0;">Filing status</h2>
+      <div class="row">
+        <div>
+          <label for="filing_status">Status</label>
+          <select id="filing_status">
+            <option value="single">Single</option>
+            <option value="mfj">Married filing jointly</option>
+          </select>
+          <p class="subtitle" style="font-size:11px;margin-top:6px;">Used for the tax estimate. Set to your actual filing status.</p>
+        </div>
+      </div>
+    </div>
+
+    <div class="card">
+      <h2 style="margin-top:0;">Cell phone</h2>
+      <div class="row">
+        <div>
+          <label for="cell_monthly">Monthly bill ($)</label>
+          <input id="cell_monthly" type="number" step="0.01" min="0">
+        </div>
+        <div>
+          <label for="cell_jreedconsults_pct">jreedconsults %</label>
+          <input id="cell_jreedconsults_pct" type="number" step="1" min="0" max="100">
+        </div>
+        <div>
+          <label for="cell_dwm_pct">DWM %</label>
+          <input id="cell_dwm_pct" type="number" step="1" min="0" max="100">
+        </div>
+      </div>
+      <p class="subtitle" style="font-size:11px;margin-top:8px;">jreedconsults + DWM percentages = your total business use (rest is personal/non-deductible).</p>
+    </div>
+
+    <div class="card">
+      <h2 style="margin-top:0;">Internet</h2>
+      <div class="row">
+        <div>
+          <label for="internet_monthly">Monthly bill ($)</label>
+          <input id="internet_monthly" type="number" step="0.01" min="0">
+        </div>
+        <div>
+          <label for="internet_jreedconsults_pct">jreedconsults %</label>
+          <input id="internet_jreedconsults_pct" type="number" step="1" min="0" max="100">
+        </div>
+        <div>
+          <label for="internet_dwm_pct">DWM %</label>
+          <input id="internet_dwm_pct" type="number" step="1" min="0" max="100">
+        </div>
+      </div>
+    </div>
+
+    <div class="card">
+      <h2 style="margin-top:0;">Home office</h2>
+      <div class="row">
+        <div>
+          <label for="home_office_sqft">Square feet</label>
+          <input id="home_office_sqft" type="number" step="1" min="0">
+        </div>
+        <div>
+          <label for="home_office_method">Method</label>
+          <select id="home_office_method">
+            <option value="simplified">Simplified ($5/sqft, cap 300)</option>
+            <option value="actual">Actual (% of home expenses)</option>
+          </select>
+        </div>
+        <div>
+          <label for="home_office_actual_annual">Actual annual ($)</label>
+          <input id="home_office_actual_annual" type="number" step="0.01" min="0">
+          <p class="subtitle" style="font-size:11px;margin-top:6px;">Only used if method = Actual.</p>
+        </div>
+      </div>
+      <div class="row" style="margin-top:10px;">
+        <div>
+          <label for="home_office_jreedconsults_pct">jreedconsults %</label>
+          <input id="home_office_jreedconsults_pct" type="number" step="1" min="0" max="100">
+        </div>
+        <div>
+          <label for="home_office_dwm_pct">DWM %</label>
+          <input id="home_office_dwm_pct" type="number" step="1" min="0" max="100">
+        </div>
+      </div>
+    </div>
+
+    <div class="card">
+      <h2 style="margin-top:0;">W-2 income (other job)</h2>
+      <p class="subtitle" style="font-size:12px;margin-top:-4px;">Your W-2 income stacks with self-employment income for tax brackets, and your W-2 withholding counts as tax already paid. From last pay stub × pay periods, or from your prior year W-2.</p>
+      <div class="row">
+        <div>
+          <label for="expected_w2_income">Annual W-2 income</label>
+          <input id="expected_w2_income" type="number" step="0.01" min="0">
+          <p class="subtitle" style="font-size:11px;margin-top:6px;">W-2 Box 1 (federal taxable wages).</p>
+        </div>
+        <div>
+          <label for="expected_w2_federal_withholding">Annual federal withholding</label>
+          <input id="expected_w2_federal_withholding" type="number" step="0.01" min="0">
+          <p class="subtitle" style="font-size:11px;margin-top:6px;">W-2 Box 2.</p>
+        </div>
+        <div>
+          <label for="expected_w2_state_withholding">Annual CA withholding</label>
+          <input id="expected_w2_state_withholding" type="number" step="0.01" min="0">
+          <p class="subtitle" style="font-size:11px;margin-top:6px;">W-2 Box 17.</p>
+        </div>
+      </div>
+      <div class="row" style="margin-top:14px;">
+        <div>
+          <label for="expected_spouse_w2_income">Spouse's annual W-2 income (MFJ)</label>
+          <input id="expected_spouse_w2_income" type="number" step="0.01" min="0">
+          <p class="subtitle" style="font-size:11px;margin-top:6px;">Combined gross income from spouse's W-2s + K-1. Used for tax bracket stacking only — assumes spouse covers her own quarterly payments / W-2 withholding.</p>
+        </div>
+      </div>
+    </div>
+
+    <div class="card">
+      <h2 style="margin-top:0;">Annual targets &amp; prior year (for full-year projection)</h2>
+      <p class="subtitle" style="font-size:12px;margin-top:-4px;">Set these to enable the projection-based "Recommended quarterly payment" and "Safe harbor floor" on the Dashboard.</p>
+      <div class="row">
+        <div>
+          <label for="expected_jreedconsults_income">Expected jreedconsults income (yr)</label>
+          <input id="expected_jreedconsults_income" type="number" step="0.01" min="0">
+        </div>
+        <div>
+          <label for="expected_dwm_income">Expected DWM income (yr)</label>
+          <input id="expected_dwm_income" type="number" step="0.01" min="0">
+        </div>
+      </div>
+      <div class="row" style="margin-top:10px;">
+        <div>
+          <label for="prior_year_total_tax">Prior year total tax ($)</label>
+          <input id="prior_year_total_tax" type="number" step="0.01" min="0">
+          <p class="subtitle" style="font-size:11px;margin-top:6px;">Federal + CA combined, from last year's actual filing.</p>
+        </div>
+        <div>
+          <label for="prior_year_agi">Prior year AGI ($)</label>
+          <input id="prior_year_agi" type="number" step="0.01" min="0">
+          <p class="subtitle" style="font-size:11px;margin-top:6px;">If > $150,000, safe harbor uses 110% of prior tax.</p>
+        </div>
+      </div>
+    </div>
+
+    <button class="primary" type="submit">Save settings</button>
+    <p class="success" id="ok" style="display:none">Saved.</p>
+    <p class="error" id="err" style="display:none"></p>
+  </form>
+</div>
+
+<script>
+document.getElementById('signout').addEventListener('click', async () => {
+  await window.sb.auth.signOut();
+  window.location.href = '/login.html';
+});
+
+const fields = [
+  'irs_mileage_rate', 'filing_status',
+  'cell_monthly', 'cell_jreedconsults_pct', 'cell_dwm_pct',
+  'internet_monthly', 'internet_jreedconsults_pct', 'internet_dwm_pct',
+  'home_office_sqft', 'home_office_method', 'home_office_actual_annual',
+  'home_office_jreedconsults_pct', 'home_office_dwm_pct',
+  'expected_jreedconsults_income', 'expected_dwm_income',
+  'expected_w2_income', 'expected_w2_federal_withholding', 'expected_w2_state_withholding',
+  'expected_spouse_w2_income',
+  'prior_year_total_tax', 'prior_year_agi'
+];
+
+async function load() {
+  const r = await window.apiFetch('/api/settings');
+  const s = await r.json();
+  fields.forEach(k => {
+    const el = document.getElementById(k);
+    if (el) el.value = s[k];
+  });
+}
+
+document.getElementById('settings-form').addEventListener('submit', async (e) => {
+  e.preventDefault();
+  const body = {};
+  fields.forEach(k => {
+    const el = document.getElementById(k);
+    if (!el) return;
+    if (el.type === 'number') body[k] = parseFloat(el.value);
+    else body[k] = el.value;
+  });
+  const r = await window.apiFetch('/api/settings', { method: 'PUT', body: JSON.stringify(body) });
+  const ok = document.getElementById('ok');
+  const err = document.getElementById('err');
+  if (!r.ok) {
+    const j = await r.json().catch(() => ({}));
+    err.textContent = j.error || 'Save failed.';
+    err.style.display = 'block';
+    ok.style.display = 'none';
+    return;
+  }
+  err.style.display = 'none';
+  ok.style.display = 'block';
+  setTimeout(() => { ok.style.display = 'none'; }, 2500);
+});
+
+(async function init() {
+  await window.authReady;
+  load();
+})();
+</script>
+</body>
+</html>

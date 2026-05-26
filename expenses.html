@@ -1,0 +1,219 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Expenses — J. Reed Consults</title>
+  <link rel="stylesheet" href="/styles.css">
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+  <script src="/supabase-config.js"></script>
+  <script src="/auth-guard.js"></script>
+</head>
+<body>
+<header class="top">
+  <div class="inner">
+    <span class="brand">J. Reed Consults</span>
+    <nav>
+      <a href="/dashboard.html">Dashboard</a>
+      <a href="/games.html">Games</a>
+      <a href="/partner-pay.html">Partner Pay</a>
+      <a href="/mileage.html">Mileage</a>
+      <a href="/expenses.html" class="active">Expenses</a>
+      <a href="/taxes.html">Taxes</a>
+      <a href="/sep.html">SEP</a>
+      <a href="/pnl.html">P&amp;L</a>
+      <a href="/settings.html">Settings</a>
+    </nav>
+    <button class="signout" id="signout">Sign out</button>
+  </div>
+</header>
+
+<div class="container">
+  <h1>Expenses</h1>
+  <p class="subtitle">One-off business expenses. Recurring items (cell, internet, home office) live on the Settings page.</p>
+
+  <div class="card">
+    <h2 style="margin-top:0;" id="form-heading">Add an expense</h2>
+    <form id="exp-form">
+      <div class="row">
+        <div>
+          <label for="expense_date">Date</label>
+          <input id="expense_date" type="date" required>
+        </div>
+        <div>
+          <label for="amount">Amount ($)</label>
+          <input id="amount" type="number" step="0.01" required>
+        </div>
+        <div>
+          <label for="business">Business</label>
+          <select id="business" required>
+            <option value="jreedconsults">jreedconsults (LLC)</option>
+            <option value="dwm">DWM (K-1 / UPE)</option>
+          </select>
+        </div>
+        <div>
+          <label for="business_pct">Business use %</label>
+          <input id="business_pct" type="number" step="1" value="100" min="1" max="100">
+        </div>
+      </div>
+      <div class="row" style="margin-top:10px;">
+        <div>
+          <label for="vendor">Vendor</label>
+          <input id="vendor" type="text">
+        </div>
+        <div>
+          <label for="category">Category</label>
+          <select id="category">
+            <option value="">— Select —</option>
+            <option value="Software">Software / SaaS</option>
+            <option value="Supplies">Office supplies</option>
+            <option value="Meals">Meals (50%)</option>
+            <option value="Travel">Travel (lodging/airfare)</option>
+            <option value="LLC Fees">LLC / franchise fees</option>
+            <option value="Bank Fees">Bank fees</option>
+            <option value="Professional">Professional services (legal/CPA)</option>
+            <option value="Education">Education / books / conferences</option>
+            <option value="Health Insurance">Health insurance</option>
+            <option value="Equipment">Equipment / hardware</option>
+            <option value="Marketing">Marketing</option>
+            <option value="Other">Other</option>
+          </select>
+        </div>
+        <div>
+          <label for="notes">Notes</label>
+          <input id="notes" type="text">
+        </div>
+      </div>
+      <button class="primary" type="submit" id="submit-btn">Save expense</button>
+      <button type="button" id="cancel-btn" style="display:none;margin-top:12px;margin-left:8px;padding:11px 22px;background:transparent;color:#5a6b5f;border:1px solid #d6d0bd;font:inherit;letter-spacing:2px;text-transform:uppercase;font-size:12px;cursor:pointer;">Cancel</button>
+      <p class="error" id="err" style="display:none"></p>
+    </form>
+  </div>
+
+  <h2>All expenses</h2>
+  <div class="card" style="padding:0;">
+    <table>
+      <thead><tr>
+        <th>Date</th><th>Business</th><th>Category</th><th>Vendor</th><th>Amount</th><th>Biz %</th><th>Deductible</th><th>Notes</th><th></th>
+      </tr></thead>
+      <tbody id="rows"><tr><td colspan="9" style="padding:18px;color:#999;">Loading…</td></tr></tbody>
+    </table>
+  </div>
+</div>
+
+<script>
+let editingId = null;
+let currentRows = [];
+
+document.getElementById('signout').addEventListener('click', async () => {
+  await window.sb.auth.signOut();
+  window.location.href = '/login.html';
+});
+
+function dollars(n) {
+  return '$' + Number(n || 0).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+}
+
+function businessLabel(b) {
+  return b === 'dwm' ? 'DWM' : 'jreedconsults';
+}
+
+function enterEditMode(e) {
+  editingId = e.id;
+  document.getElementById('expense_date').value = e.expense_date;
+  document.getElementById('amount').value = e.amount;
+  document.getElementById('business').value = e.business;
+  document.getElementById('business_pct').value = e.business_pct;
+  document.getElementById('vendor').value = e.vendor || '';
+  document.getElementById('category').value = e.category || '';
+  document.getElementById('notes').value = e.notes || '';
+  document.getElementById('submit-btn').textContent = 'Update expense';
+  document.getElementById('cancel-btn').style.display = 'inline-block';
+  document.getElementById('form-heading').textContent = 'Edit expense';
+  window.scrollTo({ top: 0, behavior: 'smooth' });
+}
+
+function exitEditMode() {
+  editingId = null;
+  document.getElementById('exp-form').reset();
+  document.getElementById('expense_date').valueAsDate = new Date();
+  document.getElementById('business_pct').value = 100;
+  document.getElementById('submit-btn').textContent = 'Save expense';
+  document.getElementById('cancel-btn').style.display = 'none';
+  document.getElementById('form-heading').textContent = 'Add an expense';
+  document.getElementById('err').style.display = 'none';
+}
+
+document.getElementById('cancel-btn').addEventListener('click', exitEditMode);
+
+async function load() {
+  const r = await window.apiFetch('/api/expenses');
+  const tbody = document.getElementById('rows');
+  if (!r.ok) { tbody.innerHTML = '<tr><td colspan="9" class="error">Failed to load.</td></tr>'; return; }
+  currentRows = await r.json();
+  if (currentRows.length === 0) {
+    tbody.innerHTML = '<tr><td colspan="9" style="padding:18px;color:#999;">No expenses yet.</td></tr>';
+    return;
+  }
+  tbody.innerHTML = currentRows.map(e => {
+    const deductible = Number(e.amount) * Number(e.business_pct) / 100;
+    return '<tr>' +
+      '<td>' + e.expense_date + '</td>' +
+      '<td>' + businessLabel(e.business) + '</td>' +
+      '<td>' + (e.category || '—') + '</td>' +
+      '<td>' + (e.vendor || '—') + '</td>' +
+      '<td>' + dollars(e.amount) + '</td>' +
+      '<td>' + Number(e.business_pct).toFixed(0) + '%</td>' +
+      '<td>' + dollars(deductible) + '</td>' +
+      '<td>' + (e.notes || '—') + '</td>' +
+      '<td style="white-space:nowrap;">' +
+        '<button class="btn-edit" data-id="' + e.id + '" style="background:transparent;border:0;color:#1b4332;cursor:pointer;padding:4px 8px;font-size:12px;text-transform:uppercase;letter-spacing:1px;">Edit</button>' +
+        '<button class="danger" data-id="' + e.id + '">Delete</button>' +
+      '</td></tr>';
+  }).join('');
+  tbody.querySelectorAll('.btn-edit').forEach(btn => btn.addEventListener('click', () => {
+    const e = currentRows.find(x => x.id === btn.dataset.id);
+    if (e) enterEditMode(e);
+  }));
+  tbody.querySelectorAll('button.danger').forEach(btn => btn.addEventListener('click', async () => {
+    if (!confirm('Delete this expense?')) return;
+    await window.apiFetch('/api/expenses/' + btn.dataset.id, { method: 'DELETE' });
+    if (editingId === btn.dataset.id) exitEditMode();
+    load();
+  }));
+}
+
+document.getElementById('exp-form').addEventListener('submit', async (e) => {
+  e.preventDefault();
+  const body = {
+    expense_date: document.getElementById('expense_date').value,
+    amount: parseFloat(document.getElementById('amount').value),
+    business: document.getElementById('business').value,
+    business_pct: parseFloat(document.getElementById('business_pct').value) || 100,
+    vendor: document.getElementById('vendor').value || null,
+    category: document.getElementById('category').value || null,
+    notes: document.getElementById('notes').value || null
+  };
+  const url = editingId ? '/api/expenses/' + editingId : '/api/expenses';
+  const method = editingId ? 'PATCH' : 'POST';
+  const r = await window.apiFetch(url, { method, body: JSON.stringify(body) });
+  const err = document.getElementById('err');
+  if (!r.ok) {
+    const j = await r.json().catch(() => ({}));
+    err.textContent = j.error || 'Failed to save.';
+    err.style.display = 'block';
+    return;
+  }
+  err.style.display = 'none';
+  exitEditMode();
+  load();
+});
+
+(async function init() {
+  await window.authReady;
+  document.getElementById('expense_date').valueAsDate = new Date();
+  load();
+})();
+</script>
+</body>
+</html>
