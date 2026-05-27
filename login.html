@@ -16,30 +16,74 @@
     <form id="login-form">
       <label for="email">Email</label>
       <input id="email" type="email" required autocomplete="email">
-      <button class="primary" type="submit">Send magic link</button>
+      <label for="password" style="margin-top:14px;">Password</label>
+      <input id="password" type="password" autocomplete="current-password" placeholder="(leave blank to use magic link)">
+      <button class="primary" type="submit">Sign in</button>
       <p class="error" id="err" style="display:none"></p>
-      <p class="success" id="ok" style="display:none">Check your email for a sign-in link.</p>
+      <p class="success" id="ok" style="display:none"></p>
+      <p style="margin-top:18px;font-size:12px;">
+        <a href="#" id="reset-link" style="color:#1b4332;">Set or reset password →</a>
+      </p>
     </form>
   </div>
 </div>
 <script>
 const sb = supabase.createClient(window.SUPABASE_URL, window.SUPABASE_ANON_KEY);
+
+function showError(msg) {
+  const el = document.getElementById('err');
+  el.textContent = msg;
+  el.style.display = 'block';
+  document.getElementById('ok').style.display = 'none';
+}
+function showOk(msg) {
+  const el = document.getElementById('ok');
+  el.textContent = msg;
+  el.style.display = 'block';
+  document.getElementById('err').style.display = 'none';
+}
+
 document.getElementById('login-form').addEventListener('submit', async function (e) {
   e.preventDefault();
   const email = document.getElementById('email').value.trim();
-  const err = document.getElementById('err');
-  const ok = document.getElementById('ok');
-  err.style.display = 'none';
-  ok.style.display = 'none';
-  const { error } = await sb.auth.signInWithOtp({
-    email: email,
-    options: { emailRedirectTo: window.location.origin + '/auth-callback.html' }
+  const password = document.getElementById('password').value;
+
+  if (password) {
+    // Password sign-in
+    const { error } = await sb.auth.signInWithPassword({ email, password });
+    if (error) {
+      showError(error.message);
+    } else {
+      window.location.href = '/dashboard.html';
+    }
+  } else {
+    // Magic link
+    const { error } = await sb.auth.signInWithOtp({
+      email: email,
+      options: { emailRedirectTo: window.location.origin + '/auth-callback.html' }
+    });
+    if (error) {
+      showError(error.message);
+    } else {
+      showOk('Check your email for a sign-in link.');
+    }
+  }
+});
+
+document.getElementById('reset-link').addEventListener('click', async function (e) {
+  e.preventDefault();
+  const email = document.getElementById('email').value.trim();
+  if (!email) {
+    showError('Enter your email first, then click "Set or reset password."');
+    return;
+  }
+  const { error } = await sb.auth.resetPasswordForEmail(email, {
+    redirectTo: window.location.origin + '/set-password.html'
   });
   if (error) {
-    err.textContent = error.message;
-    err.style.display = 'block';
+    showError(error.message);
   } else {
-    ok.style.display = 'block';
+    showOk('Check your email for a password-set link.');
   }
 });
 </script>
