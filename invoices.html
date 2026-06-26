@@ -288,9 +288,20 @@ async function load() {
   tbody.querySelectorAll('.btn-edit').forEach(b => b.addEventListener('click', () => enterEditMode(b.dataset.id)));
   tbody.querySelectorAll('.btn-pdf').forEach(b => b.addEventListener('click', async () => {
     const r = await window.apiFetch('/api/invoices/' + b.dataset.id + '/pdf');
-    if (!r.ok) return alert('Failed to load PDF.');
+    if (!r.ok) {
+      const j = await r.json().catch(() => ({}));
+      return alert('Failed to load PDF: ' + (j.error || r.status));
+    }
     const blob = await r.blob();
-    window.open(URL.createObjectURL(blob), '_blank');
+    const url = URL.createObjectURL(blob);
+    const num = b.closest('tr').querySelector('td').textContent.trim();
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = num + '.pdf';
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    setTimeout(() => URL.revokeObjectURL(url), 1000);
   }));
   tbody.querySelectorAll('.btn-send').forEach(b => b.addEventListener('click', () => openSendModal(b.dataset.id, b.dataset.email, b.dataset.num)));
   tbody.querySelectorAll('.btn-paid').forEach(b => b.addEventListener('click', async () => {

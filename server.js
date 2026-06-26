@@ -812,7 +812,7 @@ function buildInvoicePdf(inv) {
     if (INVOICE_BUSINESS_EMAIL) doc.text(INVOICE_BUSINESS_EMAIL, 50, INVOICE_BUSINESS_ADDRESS ? 90 : 75);
 
     // Invoice meta (right side)
-    doc.fillColor('#1b4332').fontSize(28).font('Helvetica-Light').text('INVOICE', 350, 50, { width: 200, align: 'right' });
+    doc.fillColor('#1b4332').fontSize(28).font('Helvetica').text('INVOICE', 350, 50, { width: 200, align: 'right' });
     doc.fillColor('#5a6b5f').fontSize(10).font('Helvetica')
       .text('Invoice #: ' + inv.invoice_number, 350, 85, { width: 200, align: 'right' })
       .text('Issued: ' + inv.issue_date, 350, 100, { width: 200, align: 'right' });
@@ -892,6 +892,7 @@ app.get('/api/invoices/:id/pdf', async (req, res) => {
     res.setHeader('Content-Disposition', 'inline; filename="' + inv.invoice_number + '.pdf"');
     res.send(pdf);
   } catch (e) {
+    console.error('PDF generation failed:', e);
     res.status(500).json({ error: e.message });
   }
 });
