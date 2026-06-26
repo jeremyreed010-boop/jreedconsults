@@ -5,7 +5,9 @@ require('dotenv').config();
 const express = require('express');
 const cors = require('cors');
 const path = require('path');
+const PDFDocument = require('pdfkit');
 const { createClient } = require('@supabase/supabase-js');
+const { Resend } = require('resend');
 
 const app = express();
 const PORT = process.env.PORT || 3000;
@@ -21,6 +23,14 @@ if (!SUPABASE_URL || !SUPABASE_ANON_KEY || !SUPABASE_SERVICE_KEY) {
 
 const ALLOWED_EMAILS = (process.env.ALLOWED_EMAILS || '')
   .split(',').map(e => e.trim().toLowerCase()).filter(Boolean);
+
+const RESEND_API_KEY = process.env.RESEND_API_KEY;
+const INVOICE_FROM_EMAIL = process.env.INVOICE_FROM_EMAIL || 'jeremy@jreedconsults.com';
+const INVOICE_FROM_NAME = process.env.INVOICE_FROM_NAME || 'Jeremy Reed';
+const INVOICE_BUSINESS_NAME = process.env.INVOICE_BUSINESS_NAME || 'J. Reed Consults LLC';
+const INVOICE_BUSINESS_ADDRESS = process.env.INVOICE_BUSINESS_ADDRESS || '';
+const INVOICE_BUSINESS_EMAIL = process.env.INVOICE_BUSINESS_EMAIL || INVOICE_FROM_EMAIL;
+const resend = RESEND_API_KEY ? new Resend(RESEND_API_KEY) : null;
 
 const authClient = createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
 const db = createClient(SUPABASE_URL, SUPABASE_SERVICE_KEY);
@@ -624,6 +634,348 @@ app.get('/api/summary', async (req, res) => {
 
     next_quarterly_due: recommendedDueDate
   });
+});
+
+// ---- Invoices ----
+
+function dollars(n) {
+  return '$' + Number(n || 0).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+}
+
+async function loadInvoice(userId, invoiceId) {
+  const { data: inv, error: invErr } = await db.from('invoices').select('*')
+    .eq('id', invoiceId).eq('user_id', userId).maybeSingle();
+  if (invErr) throw invErr;
+  if (!inv) return null;
+  const { data: items, error: itemErr } = await db.from('invoice_line_items').select('*')
+    .eq('invoice_id', invoiceId).order('position', { ascending: true });
+  if (itemErr) throw itemErr;
+  inv.line_items = items || [];
+  return inv;
+}
+
+function recalcTotals(items, taxRatePct) {
+  const subtotal = items.reduce((s, it) => s + Number(it.quantity) * Number(it.unit_price), 0);
+  const tax = subtotal * (Number(taxRatePct || 0) / 100);
+  return { subtotal, tax, total: subtotal + tax };
+}
+
+async function nextInvoiceNumber(userId) {
+  const { data } = await db.from('invoices').select('invoice_number')
+    .eq('user_id', userId).order('created_at', { ascending: false }).limit(50);
+  let maxN = 1000;
+  for (const r of (data || [])) {
+    const m = (r.invoice_number || '').match(/(\d+)\s*$/);
+    if (m) maxN = Math.max(maxN, parseInt(m[1], 10));
+  }
+  return 'INV-' + (maxN + 1);
+}
+
+app.get('/api/invoices', async (req, res) => {
+  const { data, error } = await db.from('invoices').select('*')
+    .eq('user_id', req.user.id).order('issue_date', { ascending: false });
+  if (error) return res.status(500).json({ error: error.message });
+  res.json(data);
+});
+
+app.get('/api/invoices/next_number', async (req, res) => {
+  try {
+    const num = await nextInvoiceNumber(req.user.id);
+    res.json({ invoice_number: num });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+app.get('/api/invoices/:id', async (req, res) => {
+  try {
+    const inv = await loadInvoice(req.user.id, req.params.id);
+    if (!inv) return res.status(404).json({ error: 'Not found' });
+    res.json(inv);
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+app.post('/api/invoices', async (req, res) => {
+  const b = req.body;
+  const items = Array.isArray(b.line_items) ? b.line_items : [];
+  const totals = recalcTotals(items, b.tax_rate);
+  const invoiceNumber = b.invoice_number || await nextInvoiceNumber(req.user.id);
+  const { data: inv, error } = await db.from('invoices').insert({
+    user_id: req.user.id,
+    invoice_number: invoiceNumber,
+    client_name: b.client_name,
+    client_email: b.client_email || null,
+    client_address: b.client_address || null,
+    issue_date: b.issue_date,
+    due_date: b.due_date || null,
+    status: b.status || 'draft',
+    notes: b.notes || null,
+    tax_rate: b.tax_rate || 0,
+    subtotal: totals.subtotal,
+    tax_amount: totals.tax,
+    total: totals.total
+  }).select().single();
+  if (error) return res.status(500).json({ error: error.message });
+  if (items.length) {
+    const rows = items.map((it, i) => ({
+      invoice_id: inv.id,
+      position: i,
+      description: it.description || '',
+      quantity: Number(it.quantity) || 0,
+      unit_price: Number(it.unit_price) || 0,
+      amount: (Number(it.quantity) || 0) * (Number(it.unit_price) || 0)
+    }));
+    const { error: itemErr } = await db.from('invoice_line_items').insert(rows);
+    if (itemErr) return res.status(500).json({ error: itemErr.message });
+  }
+  const full = await loadInvoice(req.user.id, inv.id);
+  res.json(full);
+});
+
+app.patch('/api/invoices/:id', async (req, res) => {
+  const b = req.body;
+  const existing = await loadInvoice(req.user.id, req.params.id);
+  if (!existing) return res.status(404).json({ error: 'Not found' });
+
+  const fields = {};
+  ['client_name', 'client_email', 'client_address', 'issue_date', 'due_date',
+   'status', 'notes', 'tax_rate', 'invoice_number', 'paid_amount', 'paid_at', 'sent_at']
+    .forEach(k => { if (k in b) fields[k] = b[k]; });
+
+  let items = existing.line_items;
+  if (Array.isArray(b.line_items)) {
+    await db.from('invoice_line_items').delete().eq('invoice_id', req.params.id);
+    items = b.line_items;
+    if (items.length) {
+      const rows = items.map((it, i) => ({
+        invoice_id: req.params.id,
+        position: i,
+        description: it.description || '',
+        quantity: Number(it.quantity) || 0,
+        unit_price: Number(it.unit_price) || 0,
+        amount: (Number(it.quantity) || 0) * (Number(it.unit_price) || 0)
+      }));
+      const { error: itemErr } = await db.from('invoice_line_items').insert(rows);
+      if (itemErr) return res.status(500).json({ error: itemErr.message });
+    }
+  }
+
+  const taxRate = 'tax_rate' in fields ? fields.tax_rate : existing.tax_rate;
+  const totals = recalcTotals(items, taxRate);
+  fields.subtotal = totals.subtotal;
+  fields.tax_amount = totals.tax;
+  fields.total = totals.total;
+
+  const { error } = await db.from('invoices').update(fields)
+    .eq('id', req.params.id).eq('user_id', req.user.id);
+  if (error) return res.status(500).json({ error: error.message });
+
+  const full = await loadInvoice(req.user.id, req.params.id);
+  res.json(full);
+});
+
+app.post('/api/invoices/:id/mark_paid', async (req, res) => {
+  const inv = await loadInvoice(req.user.id, req.params.id);
+  if (!inv) return res.status(404).json({ error: 'Not found' });
+  const paidAmount = req.body && req.body.paid_amount != null ? Number(req.body.paid_amount) : Number(inv.total);
+  const { data, error } = await db.from('invoices').update({
+    status: 'paid',
+    paid_at: new Date().toISOString(),
+    paid_amount: paidAmount
+  }).eq('id', req.params.id).eq('user_id', req.user.id).select().single();
+  if (error) return res.status(500).json({ error: error.message });
+  res.json(data);
+});
+
+app.delete('/api/invoices/:id', async (req, res) => {
+  const { error } = await db.from('invoices').delete()
+    .eq('id', req.params.id).eq('user_id', req.user.id);
+  if (error) return res.status(500).json({ error: error.message });
+  res.json({ ok: true });
+});
+
+// PDF generation: returns a Buffer
+function buildInvoicePdf(inv) {
+  return new Promise((resolve, reject) => {
+    const doc = new PDFDocument({ size: 'LETTER', margin: 50 });
+    const chunks = [];
+    doc.on('data', c => chunks.push(c));
+    doc.on('end', () => resolve(Buffer.concat(chunks)));
+    doc.on('error', reject);
+
+    // Header
+    doc.fillColor('#1b4332').fontSize(20).font('Helvetica-Bold').text(INVOICE_BUSINESS_NAME, 50, 50);
+    doc.fillColor('#5a6b5f').fontSize(10).font('Helvetica');
+    if (INVOICE_BUSINESS_ADDRESS) doc.text(INVOICE_BUSINESS_ADDRESS, 50, 75);
+    if (INVOICE_BUSINESS_EMAIL) doc.text(INVOICE_BUSINESS_EMAIL, 50, INVOICE_BUSINESS_ADDRESS ? 90 : 75);
+
+    // Invoice meta (right side)
+    doc.fillColor('#1b4332').fontSize(28).font('Helvetica-Light').text('INVOICE', 350, 50, { width: 200, align: 'right' });
+    doc.fillColor('#5a6b5f').fontSize(10).font('Helvetica')
+      .text('Invoice #: ' + inv.invoice_number, 350, 85, { width: 200, align: 'right' })
+      .text('Issued: ' + inv.issue_date, 350, 100, { width: 200, align: 'right' });
+    if (inv.due_date) doc.text('Due: ' + inv.due_date, 350, 115, { width: 200, align: 'right' });
+
+    // Bill to
+    doc.fillColor('#2d5a40').fontSize(10).font('Helvetica-Bold').text('BILL TO', 50, 150);
+    doc.fillColor('#1b2e1f').fontSize(11).font('Helvetica').text(inv.client_name, 50, 165);
+    let y = 180;
+    if (inv.client_address) {
+      doc.fontSize(10).fillColor('#5a6b5f').text(inv.client_address, 50, y, { width: 250 });
+      y += 30;
+    }
+    if (inv.client_email) {
+      doc.fontSize(10).fillColor('#5a6b5f').text(inv.client_email, 50, y);
+      y += 15;
+    }
+
+    // Line items table
+    const tableTop = Math.max(y + 20, 240);
+    doc.fillColor('#1b4332').rect(50, tableTop, 512, 22).fill();
+    doc.fillColor('#f5ecd5').fontSize(10).font('Helvetica-Bold')
+      .text('Description', 60, tableTop + 7)
+      .text('Qty', 340, tableTop + 7, { width: 50, align: 'right' })
+      .text('Price', 400, tableTop + 7, { width: 70, align: 'right' })
+      .text('Amount', 480, tableTop + 7, { width: 72, align: 'right' });
+
+    let rowY = tableTop + 30;
+    doc.fillColor('#1b2e1f').font('Helvetica').fontSize(10);
+    for (const it of (inv.line_items || [])) {
+      const amount = Number(it.quantity) * Number(it.unit_price);
+      const descHeight = doc.heightOfString(it.description || '', { width: 270 });
+      doc.text(it.description || '', 60, rowY, { width: 270 });
+      doc.text(Number(it.quantity).toString(), 340, rowY, { width: 50, align: 'right' });
+      doc.text(dollars(it.unit_price), 400, rowY, { width: 70, align: 'right' });
+      doc.text(dollars(amount), 480, rowY, { width: 72, align: 'right' });
+      rowY += Math.max(20, descHeight + 8);
+      doc.strokeColor('#ece5cf').lineWidth(0.5).moveTo(50, rowY - 4).lineTo(562, rowY - 4).stroke();
+    }
+
+    // Totals
+    rowY += 10;
+    doc.fillColor('#5a6b5f').font('Helvetica').fontSize(10)
+      .text('Subtotal', 380, rowY, { width: 100, align: 'right' })
+      .text(dollars(inv.subtotal), 480, rowY, { width: 72, align: 'right' });
+    rowY += 18;
+    if (Number(inv.tax_rate) > 0) {
+      doc.text('Tax (' + Number(inv.tax_rate).toFixed(2) + '%)', 380, rowY, { width: 100, align: 'right' })
+        .text(dollars(inv.tax_amount), 480, rowY, { width: 72, align: 'right' });
+      rowY += 18;
+    }
+    doc.strokeColor('#c9a961').lineWidth(1).moveTo(380, rowY).lineTo(562, rowY).stroke();
+    rowY += 6;
+    doc.fillColor('#1b4332').font('Helvetica-Bold').fontSize(13)
+      .text('Total', 380, rowY, { width: 100, align: 'right' })
+      .text(dollars(inv.total), 480, rowY, { width: 72, align: 'right' });
+
+    if (inv.notes) {
+      rowY += 40;
+      doc.fillColor('#2d5a40').font('Helvetica-Bold').fontSize(10).text('NOTES', 50, rowY);
+      doc.fillColor('#1b2e1f').font('Helvetica').fontSize(10).text(inv.notes, 50, rowY + 15, { width: 512 });
+    }
+
+    doc.fillColor('#7a8a7e').fontSize(9).font('Helvetica')
+      .text('Thank you for your business.', 50, 720, { align: 'center', width: 512 });
+
+    doc.end();
+  });
+}
+
+app.get('/api/invoices/:id/pdf', async (req, res) => {
+  try {
+    const inv = await loadInvoice(req.user.id, req.params.id);
+    if (!inv) return res.status(404).json({ error: 'Not found' });
+    const pdf = await buildInvoicePdf(inv);
+    res.setHeader('Content-Type', 'application/pdf');
+    res.setHeader('Content-Disposition', 'inline; filename="' + inv.invoice_number + '.pdf"');
+    res.send(pdf);
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+app.post('/api/invoices/:id/send', async (req, res) => {
+  if (!resend) return res.status(500).json({ error: 'RESEND_API_KEY not configured' });
+  try {
+    const inv = await loadInvoice(req.user.id, req.params.id);
+    if (!inv) return res.status(404).json({ error: 'Not found' });
+    const to = (req.body && req.body.to) || inv.client_email;
+    if (!to) return res.status(400).json({ error: 'No client email on file' });
+
+    const pdf = await buildInvoicePdf(inv);
+    const subject = (req.body && req.body.subject) || `Invoice ${inv.invoice_number} from ${INVOICE_BUSINESS_NAME}`;
+    const dueLine = inv.due_date ? `<p>Due: <strong>${inv.due_date}</strong></p>` : '';
+    const customMsg = (req.body && req.body.message) ? `<p>${String(req.body.message).replace(/\n/g, '<br>')}</p>` : '';
+    const html = `
+      <div style="font-family:Helvetica,Arial,sans-serif;color:#1b2e1f;max-width:560px;">
+        <p>Hi ${inv.client_name.split(' ')[0] || 'there'},</p>
+        ${customMsg || `<p>Please find attached invoice <strong>${inv.invoice_number}</strong> for <strong>${dollars(inv.total)}</strong>.</p>`}
+        ${dueLine}
+        <p>Let me know if you have any questions.</p>
+        <p>Thanks,<br>${INVOICE_FROM_NAME}<br>${INVOICE_BUSINESS_NAME}</p>
+      </div>`;
+
+    const { data, error } = await resend.emails.send({
+      from: `${INVOICE_FROM_NAME} <${INVOICE_FROM_EMAIL}>`,
+      to: [to],
+      subject,
+      html,
+      attachments: [{
+        filename: `${inv.invoice_number}.pdf`,
+        content: pdf.toString('base64')
+      }]
+    });
+    if (error) return res.status(500).json({ error: error.message || JSON.stringify(error) });
+
+    await db.from('invoices').update({
+      status: inv.status === 'paid' ? 'paid' : 'sent',
+      sent_at: new Date().toISOString()
+    }).eq('id', inv.id).eq('user_id', req.user.id);
+
+    res.json({ ok: true, id: data && data.id });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// ---- Charitable contributions (Schedule A, not Schedule C) ----
+app.get('/api/charity', async (req, res) => {
+  const { data, error } = await db.from('charitable_contributions').select('*')
+    .eq('user_id', req.user.id).order('contribution_date', { ascending: false });
+  if (error) return res.status(500).json({ error: error.message });
+  res.json(data);
+});
+app.post('/api/charity', async (req, res) => {
+  const b = req.body;
+  const { data, error } = await db.from('charitable_contributions').insert({
+    user_id: req.user.id,
+    contribution_date: b.contribution_date,
+    recipient: b.recipient,
+    amount: b.amount,
+    contribution_type: b.contribution_type || 'cash',
+    tax_year: b.tax_year || new Date(b.contribution_date).getFullYear(),
+    receipt_url: b.receipt_url || null,
+    notes: b.notes || null
+  }).select().single();
+  if (error) return res.status(500).json({ error: error.message });
+  res.json(data);
+});
+app.patch('/api/charity/:id', async (req, res) => {
+  const fields = {};
+  ['contribution_date', 'recipient', 'amount', 'contribution_type', 'tax_year', 'receipt_url', 'notes']
+    .forEach(k => { if (k in req.body) fields[k] = req.body[k]; });
+  const { data, error } = await db.from('charitable_contributions').update(fields)
+    .eq('id', req.params.id).eq('user_id', req.user.id).select().single();
+  if (error) return res.status(500).json({ error: error.message });
+  res.json(data);
+});
+app.delete('/api/charity/:id', async (req, res) => {
+  const { error } = await db.from('charitable_contributions').delete()
+    .eq('id', req.params.id).eq('user_id', req.user.id);
+  if (error) return res.status(500).json({ error: error.message });
+  res.json({ ok: true });
 });
 
 app.listen(PORT, () => console.log('jreedconsults listening on :' + PORT));

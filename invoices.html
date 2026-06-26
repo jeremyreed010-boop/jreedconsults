@@ -1,0 +1,389 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Invoices — J. Reed Consults</title>
+  <link rel="stylesheet" href="/styles.css">
+  <style>
+    .li-row { display:grid; grid-template-columns: 1fr 80px 110px 110px 30px; gap:8px; align-items:center; margin-bottom:8px; }
+    .li-row input { padding: 8px 10px; }
+    .li-remove { background:transparent; border:0; color:#8b3a3a; cursor:pointer; font-size:18px; padding:4px; }
+    .badge { display:inline-block; padding:2px 8px; font-size:10px; letter-spacing:1px; text-transform:uppercase; font-weight:600; border-radius:2px; }
+    .badge-draft { background:#ece5cf; color:#5a6b5f; }
+    .badge-sent { background:#f0e8d0; color:#7a6a3a; }
+    .badge-paid { background:#d4e8d4; color:#2d5a40; }
+    .badge-void { background:#f4d4d4; color:#8b3a3a; }
+    .totals-row { display:flex; justify-content:space-between; font-size:14px; padding:6px 0; color:#5a6b5f; }
+    .totals-row.grand { font-weight:600; font-size:16px; color:#1b4332; border-top:1px solid #c9a961; padding-top:10px; margin-top:4px; }
+    .modal-bg { position:fixed; inset:0; background:rgba(27,46,31,0.55); display:none; align-items:center; justify-content:center; z-index:50; }
+    .modal-bg.show { display:flex; }
+    .modal { background:#fff; border-left:3px solid #c9a961; padding:24px; max-width:500px; width:90%; }
+  </style>
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+  <script src="/supabase-config.js"></script>
+  <script src="/auth-guard.js"></script>
+</head>
+<body>
+<header class="top">
+  <div class="inner">
+    <span class="brand">J. Reed Consults</span>
+    <nav>
+      <a href="/dashboard.html">Dashboard</a>
+      <a href="/games.html">Games</a>
+      <a href="/invoices.html" class="active">Invoices</a>
+      <a href="/partner-pay.html">Partner Pay</a>
+      <a href="/mileage.html">Mileage</a>
+      <a href="/expenses.html">Expenses</a>
+      <a href="/charity.html">Charity</a>
+      <a href="/taxes.html">Taxes</a>
+      <a href="/sep.html">SEP</a>
+      <a href="/pnl.html">P&amp;L</a>
+      <a href="/settings.html">Settings</a>
+    </nav>
+    <button class="signout" id="signout">Sign out</button>
+  </div>
+</header>
+
+<div class="container">
+  <h1>Invoices</h1>
+  <p class="subtitle">Create, send (via Resend), and track invoices for jreedconsults LLC.</p>
+
+  <div class="card">
+    <h2 style="margin-top:0;" id="form-heading">New invoice</h2>
+    <form id="inv-form">
+      <div class="row">
+        <div>
+          <label for="invoice_number">Invoice #</label>
+          <input id="invoice_number" type="text" required>
+        </div>
+        <div>
+          <label for="issue_date">Issue date</label>
+          <input id="issue_date" type="date" required>
+        </div>
+        <div>
+          <label for="due_date">Due date</label>
+          <input id="due_date" type="date">
+        </div>
+        <div>
+          <label for="tax_rate">Tax rate (%)</label>
+          <input id="tax_rate" type="number" step="0.01" value="0">
+        </div>
+      </div>
+      <div class="row" style="margin-top:10px;">
+        <div>
+          <label for="client_name">Client name</label>
+          <input id="client_name" type="text" required>
+        </div>
+        <div>
+          <label for="client_email">Client email</label>
+          <input id="client_email" type="email">
+        </div>
+      </div>
+      <div class="row" style="margin-top:10px;">
+        <div style="flex:1; min-width:100%;">
+          <label for="client_address">Client address</label>
+          <textarea id="client_address" rows="2"></textarea>
+        </div>
+      </div>
+
+      <h2 style="margin-top:24px;font-size:14px;">Line items</h2>
+      <div class="li-row" style="font-size:11px;text-transform:uppercase;letter-spacing:1px;color:#2d5a40;font-weight:500;">
+        <div>Description</div><div style="text-align:right;">Qty</div><div style="text-align:right;">Unit price</div><div style="text-align:right;">Amount</div><div></div>
+      </div>
+      <div id="line-items"></div>
+      <button type="button" id="add-line" style="background:transparent;border:1px dashed #c9a961;color:#1b4332;padding:8px 14px;font-size:12px;letter-spacing:1px;text-transform:uppercase;cursor:pointer;margin-top:6px;">+ Add line</button>
+
+      <div style="margin-top:18px;max-width:280px;margin-left:auto;">
+        <div class="totals-row"><span>Subtotal</span><span id="t-subtotal">$0.00</span></div>
+        <div class="totals-row"><span>Tax</span><span id="t-tax">$0.00</span></div>
+        <div class="totals-row grand"><span>Total</span><span id="t-total">$0.00</span></div>
+      </div>
+
+      <div class="row" style="margin-top:14px;">
+        <div style="flex:1; min-width:100%;">
+          <label for="notes">Notes (visible on invoice)</label>
+          <textarea id="notes" rows="2" placeholder="Payment terms, thank you, etc."></textarea>
+        </div>
+      </div>
+
+      <button class="primary" type="submit" id="submit-btn">Save invoice</button>
+      <button type="button" id="cancel-btn" style="display:none;margin-top:12px;margin-left:8px;padding:11px 22px;background:transparent;color:#5a6b5f;border:1px solid #d6d0bd;font:inherit;letter-spacing:2px;text-transform:uppercase;font-size:12px;cursor:pointer;">Cancel</button>
+      <p class="error" id="err" style="display:none"></p>
+      <p class="success" id="ok" style="display:none"></p>
+    </form>
+  </div>
+
+  <h2>All invoices</h2>
+  <div class="card" style="padding:0;">
+    <table>
+      <thead><tr>
+        <th>#</th><th>Date</th><th>Client</th><th>Status</th><th>Total</th><th>Due</th><th></th>
+      </tr></thead>
+      <tbody id="rows"><tr><td colspan="7" style="padding:18px;color:#999;">Loading…</td></tr></tbody>
+    </table>
+  </div>
+</div>
+
+<div class="modal-bg" id="send-modal">
+  <div class="modal">
+    <h2 style="margin-top:0;">Send invoice</h2>
+    <p class="subtitle" id="send-sub"></p>
+    <div>
+      <label for="send-to">To</label>
+      <input id="send-to" type="email">
+    </div>
+    <div style="margin-top:10px;">
+      <label for="send-subject">Subject</label>
+      <input id="send-subject" type="text">
+    </div>
+    <div style="margin-top:10px;">
+      <label for="send-message">Message (optional)</label>
+      <textarea id="send-message" rows="3" placeholder="Leave blank for default copy."></textarea>
+    </div>
+    <p class="error" id="send-err" style="display:none"></p>
+    <div style="margin-top:14px;text-align:right;">
+      <button type="button" id="send-cancel" style="background:transparent;color:#5a6b5f;border:1px solid #d6d0bd;padding:11px 22px;font:inherit;letter-spacing:2px;text-transform:uppercase;font-size:12px;cursor:pointer;margin-right:8px;">Cancel</button>
+      <button class="primary" type="button" id="send-confirm" style="margin-top:0;">Send</button>
+    </div>
+  </div>
+</div>
+
+<script>
+let editingId = null;
+let currentRows = [];
+let lineItems = [];
+
+document.getElementById('signout').addEventListener('click', async () => {
+  await window.sb.auth.signOut();
+  window.location.href = '/login.html';
+});
+
+function dollars(n) {
+  return '$' + Number(n || 0).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+}
+
+function renderLines() {
+  const wrap = document.getElementById('line-items');
+  wrap.innerHTML = lineItems.map((it, i) =>
+    '<div class="li-row">' +
+      '<input data-i="' + i + '" data-k="description" type="text" placeholder="Description" value="' + (it.description || '').replace(/"/g, '&quot;') + '">' +
+      '<input data-i="' + i + '" data-k="quantity" type="number" step="0.01" style="text-align:right;" value="' + (it.quantity || 0) + '">' +
+      '<input data-i="' + i + '" data-k="unit_price" type="number" step="0.01" style="text-align:right;" value="' + (it.unit_price || 0) + '">' +
+      '<div style="text-align:right;font-variant-numeric:tabular-nums;">' + dollars(Number(it.quantity) * Number(it.unit_price)) + '</div>' +
+      '<button type="button" class="li-remove" data-i="' + i + '" title="Remove">×</button>' +
+    '</div>'
+  ).join('');
+  wrap.querySelectorAll('input').forEach(inp => inp.addEventListener('input', () => {
+    const i = +inp.dataset.i, k = inp.dataset.k;
+    lineItems[i][k] = k === 'description' ? inp.value : (parseFloat(inp.value) || 0);
+    renderTotals();
+    // update amount cell inline without full re-render to keep focus
+    const row = inp.closest('.li-row');
+    if (row) {
+      const amt = row.children[3];
+      amt.textContent = dollars(Number(lineItems[i].quantity) * Number(lineItems[i].unit_price));
+    }
+  }));
+  wrap.querySelectorAll('.li-remove').forEach(btn => btn.addEventListener('click', () => {
+    lineItems.splice(+btn.dataset.i, 1);
+    renderLines();
+    renderTotals();
+  }));
+}
+
+function renderTotals() {
+  const sub = lineItems.reduce((s, it) => s + Number(it.quantity || 0) * Number(it.unit_price || 0), 0);
+  const taxRate = parseFloat(document.getElementById('tax_rate').value) || 0;
+  const tax = sub * taxRate / 100;
+  document.getElementById('t-subtotal').textContent = dollars(sub);
+  document.getElementById('t-tax').textContent = dollars(tax);
+  document.getElementById('t-total').textContent = dollars(sub + tax);
+}
+
+document.getElementById('add-line').addEventListener('click', () => {
+  lineItems.push({ description: '', quantity: 1, unit_price: 0 });
+  renderLines();
+  renderTotals();
+});
+document.getElementById('tax_rate').addEventListener('input', renderTotals);
+
+function statusBadge(s) {
+  return '<span class="badge badge-' + s + '">' + s + '</span>';
+}
+
+async function enterEditMode(id) {
+  const r = await window.apiFetch('/api/invoices/' + id);
+  if (!r.ok) return;
+  const inv = await r.json();
+  editingId = inv.id;
+  document.getElementById('invoice_number').value = inv.invoice_number;
+  document.getElementById('issue_date').value = inv.issue_date;
+  document.getElementById('due_date').value = inv.due_date || '';
+  document.getElementById('tax_rate').value = inv.tax_rate || 0;
+  document.getElementById('client_name').value = inv.client_name;
+  document.getElementById('client_email').value = inv.client_email || '';
+  document.getElementById('client_address').value = inv.client_address || '';
+  document.getElementById('notes').value = inv.notes || '';
+  lineItems = (inv.line_items || []).map(it => ({
+    description: it.description, quantity: Number(it.quantity), unit_price: Number(it.unit_price)
+  }));
+  if (!lineItems.length) lineItems.push({ description: '', quantity: 1, unit_price: 0 });
+  renderLines();
+  renderTotals();
+  document.getElementById('submit-btn').textContent = 'Update invoice';
+  document.getElementById('cancel-btn').style.display = 'inline-block';
+  document.getElementById('form-heading').textContent = 'Edit invoice ' + inv.invoice_number;
+  window.scrollTo({ top: 0, behavior: 'smooth' });
+}
+
+async function exitEditMode() {
+  editingId = null;
+  document.getElementById('inv-form').reset();
+  document.getElementById('issue_date').valueAsDate = new Date();
+  document.getElementById('tax_rate').value = 0;
+  lineItems = [{ description: '', quantity: 1, unit_price: 0 }];
+  renderLines();
+  renderTotals();
+  document.getElementById('submit-btn').textContent = 'Save invoice';
+  document.getElementById('cancel-btn').style.display = 'none';
+  document.getElementById('form-heading').textContent = 'New invoice';
+  document.getElementById('err').style.display = 'none';
+  document.getElementById('ok').style.display = 'none';
+  const nr = await window.apiFetch('/api/invoices/next_number');
+  if (nr.ok) {
+    const j = await nr.json();
+    document.getElementById('invoice_number').value = j.invoice_number;
+  }
+}
+
+document.getElementById('cancel-btn').addEventListener('click', exitEditMode);
+
+async function load() {
+  const r = await window.apiFetch('/api/invoices');
+  const tbody = document.getElementById('rows');
+  if (!r.ok) { tbody.innerHTML = '<tr><td colspan="7" class="error">Failed to load.</td></tr>'; return; }
+  currentRows = await r.json();
+  if (currentRows.length === 0) {
+    tbody.innerHTML = '<tr><td colspan="7" style="padding:18px;color:#999;">No invoices yet.</td></tr>';
+    return;
+  }
+  tbody.innerHTML = currentRows.map(inv =>
+    '<tr>' +
+      '<td>' + inv.invoice_number + '</td>' +
+      '<td>' + inv.issue_date + '</td>' +
+      '<td>' + inv.client_name + '</td>' +
+      '<td>' + statusBadge(inv.status) + '</td>' +
+      '<td>' + dollars(inv.total) + '</td>' +
+      '<td>' + (inv.due_date || '—') + '</td>' +
+      '<td style="white-space:nowrap;">' +
+        '<button class="btn-pdf" data-id="' + inv.id + '" style="background:transparent;border:0;color:#1b4332;cursor:pointer;padding:4px 6px;font-size:12px;text-transform:uppercase;letter-spacing:1px;">PDF</button>' +
+        '<button class="btn-send" data-id="' + inv.id + '" data-email="' + (inv.client_email || '') + '" data-num="' + inv.invoice_number + '" style="background:transparent;border:0;color:#1b4332;cursor:pointer;padding:4px 6px;font-size:12px;text-transform:uppercase;letter-spacing:1px;">Send</button>' +
+        (inv.status !== 'paid' ? '<button class="btn-paid" data-id="' + inv.id + '" style="background:transparent;border:0;color:#2d5a40;cursor:pointer;padding:4px 6px;font-size:12px;text-transform:uppercase;letter-spacing:1px;">Mark paid</button>' : '') +
+        '<button class="btn-edit" data-id="' + inv.id + '" style="background:transparent;border:0;color:#1b4332;cursor:pointer;padding:4px 6px;font-size:12px;text-transform:uppercase;letter-spacing:1px;">Edit</button>' +
+        '<button class="danger" data-id="' + inv.id + '">Delete</button>' +
+      '</td>' +
+    '</tr>'
+  ).join('');
+  tbody.querySelectorAll('.btn-edit').forEach(b => b.addEventListener('click', () => enterEditMode(b.dataset.id)));
+  tbody.querySelectorAll('.btn-pdf').forEach(b => b.addEventListener('click', async () => {
+    const r = await window.apiFetch('/api/invoices/' + b.dataset.id + '/pdf');
+    if (!r.ok) return alert('Failed to load PDF.');
+    const blob = await r.blob();
+    window.open(URL.createObjectURL(blob), '_blank');
+  }));
+  tbody.querySelectorAll('.btn-send').forEach(b => b.addEventListener('click', () => openSendModal(b.dataset.id, b.dataset.email, b.dataset.num)));
+  tbody.querySelectorAll('.btn-paid').forEach(b => b.addEventListener('click', async () => {
+    if (!confirm('Mark this invoice as paid?')) return;
+    await window.apiFetch('/api/invoices/' + b.dataset.id + '/mark_paid', { method: 'POST', body: '{}' });
+    load();
+  }));
+  tbody.querySelectorAll('button.danger').forEach(b => b.addEventListener('click', async () => {
+    if (!confirm('Delete this invoice?')) return;
+    await window.apiFetch('/api/invoices/' + b.dataset.id, { method: 'DELETE' });
+    if (editingId === b.dataset.id) exitEditMode();
+    load();
+  }));
+}
+
+// Send modal
+let sendingId = null;
+function openSendModal(id, email, num) {
+  sendingId = id;
+  document.getElementById('send-sub').textContent = 'Invoice ' + num;
+  document.getElementById('send-to').value = email || '';
+  document.getElementById('send-subject').value = 'Invoice ' + num + ' from J. Reed Consults LLC';
+  document.getElementById('send-message').value = '';
+  document.getElementById('send-err').style.display = 'none';
+  document.getElementById('send-modal').classList.add('show');
+}
+document.getElementById('send-cancel').addEventListener('click', () => {
+  document.getElementById('send-modal').classList.remove('show');
+});
+document.getElementById('send-confirm').addEventListener('click', async () => {
+  const to = document.getElementById('send-to').value;
+  if (!to) { document.getElementById('send-err').textContent = 'Recipient email required.'; document.getElementById('send-err').style.display = 'block'; return; }
+  const body = {
+    to,
+    subject: document.getElementById('send-subject').value,
+    message: document.getElementById('send-message').value
+  };
+  const btn = document.getElementById('send-confirm');
+  btn.disabled = true; btn.textContent = 'Sending…';
+  const r = await window.apiFetch('/api/invoices/' + sendingId + '/send', { method: 'POST', body: JSON.stringify(body) });
+  btn.disabled = false; btn.textContent = 'Send';
+  if (!r.ok) {
+    const j = await r.json().catch(() => ({}));
+    document.getElementById('send-err').textContent = j.error || 'Failed to send.';
+    document.getElementById('send-err').style.display = 'block';
+    return;
+  }
+  document.getElementById('send-modal').classList.remove('show');
+  load();
+});
+
+document.getElementById('inv-form').addEventListener('submit', async (e) => {
+  e.preventDefault();
+  const body = {
+    invoice_number: document.getElementById('invoice_number').value,
+    issue_date: document.getElementById('issue_date').value,
+    due_date: document.getElementById('due_date').value || null,
+    tax_rate: parseFloat(document.getElementById('tax_rate').value) || 0,
+    client_name: document.getElementById('client_name').value,
+    client_email: document.getElementById('client_email').value || null,
+    client_address: document.getElementById('client_address').value || null,
+    notes: document.getElementById('notes').value || null,
+    line_items: lineItems.filter(it => it.description || it.quantity || it.unit_price)
+  };
+  const url = editingId ? '/api/invoices/' + editingId : '/api/invoices';
+  const method = editingId ? 'PATCH' : 'POST';
+  const r = await window.apiFetch(url, { method, body: JSON.stringify(body) });
+  const err = document.getElementById('err'); const ok = document.getElementById('ok');
+  if (!r.ok) {
+    const j = await r.json().catch(() => ({}));
+    err.textContent = j.error || 'Failed to save.';
+    err.style.display = 'block'; ok.style.display = 'none';
+    return;
+  }
+  err.style.display = 'none';
+  ok.textContent = 'Saved.'; ok.style.display = 'block';
+  exitEditMode();
+  load();
+});
+
+(async function init() {
+  await window.authReady;
+  document.getElementById('issue_date').valueAsDate = new Date();
+  lineItems = [{ description: '', quantity: 1, unit_price: 0 }];
+  renderLines();
+  renderTotals();
+  const nr = await window.apiFetch('/api/invoices/next_number');
+  if (nr.ok) {
+    const j = await nr.json();
+    document.getElementById('invoice_number').value = j.invoice_number;
+  }
+  load();
+})();
+</script>
+</body>
+</html>

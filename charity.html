@@ -1,0 +1,220 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Charity — J. Reed Consults</title>
+  <link rel="stylesheet" href="/styles.css">
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+  <script src="/supabase-config.js"></script>
+  <script src="/auth-guard.js"></script>
+</head>
+<body>
+<header class="top">
+  <div class="inner">
+    <span class="brand">J. Reed Consults</span>
+    <nav>
+      <a href="/dashboard.html">Dashboard</a>
+      <a href="/games.html">Games</a>
+      <a href="/invoices.html">Invoices</a>
+      <a href="/partner-pay.html">Partner Pay</a>
+      <a href="/mileage.html">Mileage</a>
+      <a href="/expenses.html">Expenses</a>
+      <a href="/charity.html" class="active">Charity</a>
+      <a href="/taxes.html">Taxes</a>
+      <a href="/sep.html">SEP</a>
+      <a href="/pnl.html">P&amp;L</a>
+      <a href="/settings.html">Settings</a>
+    </nav>
+    <button class="signout" id="signout">Sign out</button>
+  </div>
+</header>
+
+<div class="container">
+  <h1>Charitable Contributions</h1>
+  <p class="subtitle">Personal Schedule A itemized deductions — kept separate from business expenses so they don't inflate Schedule C net income or SE-tax projections. Only useful at tax time if your total itemized deductions exceed the standard deduction.</p>
+
+  <div class="card">
+    <h2 style="margin-top:0;" id="form-heading">Add a contribution</h2>
+    <form id="ch-form">
+      <div class="row">
+        <div>
+          <label for="contribution_date">Date</label>
+          <input id="contribution_date" type="date" required>
+        </div>
+        <div>
+          <label for="amount">Amount ($)</label>
+          <input id="amount" type="number" step="0.01" required>
+        </div>
+        <div>
+          <label for="tax_year">Tax year</label>
+          <input id="tax_year" type="number" required>
+        </div>
+        <div>
+          <label for="contribution_type">Type</label>
+          <select id="contribution_type">
+            <option value="cash">Cash / check / card</option>
+            <option value="goods">Goods (non-cash)</option>
+            <option value="stock">Stock / securities</option>
+            <option value="mileage">Charitable mileage</option>
+          </select>
+        </div>
+      </div>
+      <div class="row" style="margin-top:10px;">
+        <div>
+          <label for="recipient">Recipient organization</label>
+          <input id="recipient" type="text" required placeholder="e.g. Bay Area Food Bank">
+        </div>
+        <div>
+          <label for="receipt_url">Receipt URL (optional)</label>
+          <input id="receipt_url" type="text" placeholder="Link to scanned receipt">
+        </div>
+      </div>
+      <div class="row" style="margin-top:10px;">
+        <div style="flex:1;min-width:100%;">
+          <label for="notes">Notes</label>
+          <input id="notes" type="text">
+        </div>
+      </div>
+      <button class="primary" type="submit" id="submit-btn">Save contribution</button>
+      <button type="button" id="cancel-btn" style="display:none;margin-top:12px;margin-left:8px;padding:11px 22px;background:transparent;color:#5a6b5f;border:1px solid #d6d0bd;font:inherit;letter-spacing:2px;text-transform:uppercase;font-size:12px;cursor:pointer;">Cancel</button>
+      <p class="error" id="err" style="display:none"></p>
+    </form>
+  </div>
+
+  <h2>All contributions</h2>
+  <div class="stat-grid" id="totals" style="margin-bottom:14px;"></div>
+  <div class="card" style="padding:0;">
+    <table>
+      <thead><tr>
+        <th>Date</th><th>Tax year</th><th>Recipient</th><th>Type</th><th>Amount</th><th>Notes</th><th></th>
+      </tr></thead>
+      <tbody id="rows"><tr><td colspan="7" style="padding:18px;color:#999;">Loading…</td></tr></tbody>
+    </table>
+  </div>
+</div>
+
+<script>
+let editingId = null;
+let currentRows = [];
+
+document.getElementById('signout').addEventListener('click', async () => {
+  await window.sb.auth.signOut();
+  window.location.href = '/login.html';
+});
+
+function dollars(n) {
+  return '$' + Number(n || 0).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+}
+
+const TYPE_LABEL = {
+  cash: 'Cash', goods: 'Goods', stock: 'Stock', mileage: 'Mileage'
+};
+
+function enterEditMode(c) {
+  editingId = c.id;
+  document.getElementById('contribution_date').value = c.contribution_date;
+  document.getElementById('amount').value = c.amount;
+  document.getElementById('tax_year').value = c.tax_year;
+  document.getElementById('contribution_type').value = c.contribution_type || 'cash';
+  document.getElementById('recipient').value = c.recipient;
+  document.getElementById('receipt_url').value = c.receipt_url || '';
+  document.getElementById('notes').value = c.notes || '';
+  document.getElementById('submit-btn').textContent = 'Update contribution';
+  document.getElementById('cancel-btn').style.display = 'inline-block';
+  document.getElementById('form-heading').textContent = 'Edit contribution';
+  window.scrollTo({ top: 0, behavior: 'smooth' });
+}
+
+function exitEditMode() {
+  editingId = null;
+  document.getElementById('ch-form').reset();
+  document.getElementById('contribution_date').valueAsDate = new Date();
+  document.getElementById('tax_year').value = new Date().getFullYear();
+  document.getElementById('submit-btn').textContent = 'Save contribution';
+  document.getElementById('cancel-btn').style.display = 'none';
+  document.getElementById('form-heading').textContent = 'Add a contribution';
+  document.getElementById('err').style.display = 'none';
+}
+
+document.getElementById('cancel-btn').addEventListener('click', exitEditMode);
+
+function renderTotals(rows) {
+  const byYear = {};
+  rows.forEach(r => {
+    byYear[r.tax_year] = (byYear[r.tax_year] || 0) + Number(r.amount);
+  });
+  const years = Object.keys(byYear).sort((a, b) => b - a).slice(0, 4);
+  document.getElementById('totals').innerHTML = years.map(y =>
+    '<div class="stat"><div class="label">' + y + ' total</div><div class="value">' + dollars(byYear[y]) + '</div></div>'
+  ).join('');
+}
+
+async function load() {
+  const r = await window.apiFetch('/api/charity');
+  const tbody = document.getElementById('rows');
+  if (!r.ok) { tbody.innerHTML = '<tr><td colspan="7" class="error">Failed to load.</td></tr>'; return; }
+  currentRows = await r.json();
+  renderTotals(currentRows);
+  if (currentRows.length === 0) {
+    tbody.innerHTML = '<tr><td colspan="7" style="padding:18px;color:#999;">No contributions yet.</td></tr>';
+    return;
+  }
+  tbody.innerHTML = currentRows.map(c => '<tr>' +
+    '<td>' + c.contribution_date + '</td>' +
+    '<td>' + c.tax_year + '</td>' +
+    '<td>' + c.recipient + (c.receipt_url ? ' <a href="' + c.receipt_url + '" target="_blank" style="color:#1b4332;font-size:11px;">receipt</a>' : '') + '</td>' +
+    '<td>' + (TYPE_LABEL[c.contribution_type] || c.contribution_type) + '</td>' +
+    '<td>' + dollars(c.amount) + '</td>' +
+    '<td>' + (c.notes || '—') + '</td>' +
+    '<td style="white-space:nowrap;">' +
+      '<button class="btn-edit" data-id="' + c.id + '" style="background:transparent;border:0;color:#1b4332;cursor:pointer;padding:4px 8px;font-size:12px;text-transform:uppercase;letter-spacing:1px;">Edit</button>' +
+      '<button class="danger" data-id="' + c.id + '">Delete</button>' +
+    '</td></tr>').join('');
+  tbody.querySelectorAll('.btn-edit').forEach(btn => btn.addEventListener('click', () => {
+    const c = currentRows.find(x => x.id === btn.dataset.id);
+    if (c) enterEditMode(c);
+  }));
+  tbody.querySelectorAll('button.danger').forEach(btn => btn.addEventListener('click', async () => {
+    if (!confirm('Delete this contribution?')) return;
+    await window.apiFetch('/api/charity/' + btn.dataset.id, { method: 'DELETE' });
+    if (editingId === btn.dataset.id) exitEditMode();
+    load();
+  }));
+}
+
+document.getElementById('ch-form').addEventListener('submit', async (e) => {
+  e.preventDefault();
+  const body = {
+    contribution_date: document.getElementById('contribution_date').value,
+    amount: parseFloat(document.getElementById('amount').value),
+    tax_year: parseInt(document.getElementById('tax_year').value, 10),
+    contribution_type: document.getElementById('contribution_type').value,
+    recipient: document.getElementById('recipient').value,
+    receipt_url: document.getElementById('receipt_url').value || null,
+    notes: document.getElementById('notes').value || null
+  };
+  const url = editingId ? '/api/charity/' + editingId : '/api/charity';
+  const method = editingId ? 'PATCH' : 'POST';
+  const r = await window.apiFetch(url, { method, body: JSON.stringify(body) });
+  const err = document.getElementById('err');
+  if (!r.ok) {
+    const j = await r.json().catch(() => ({}));
+    err.textContent = j.error || 'Failed to save.';
+    err.style.display = 'block';
+    return;
+  }
+  err.style.display = 'none';
+  exitEditMode();
+  load();
+});
+
+(async function init() {
+  await window.authReady;
+  document.getElementById('contribution_date').valueAsDate = new Date();
+  document.getElementById('tax_year').value = new Date().getFullYear();
+  load();
+})();
+</script>
+</body>
+</html>
