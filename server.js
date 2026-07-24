@@ -78,18 +78,21 @@ function seTaxOn(netSE, w2Wages) {
 
 // Household joint-return view. Both people's SE tax + a single bracket calc on
 // combined AGI. This is what actually appears on the 1040/540 when filing MFJ.
-function estimateTax(hisNetSE, hisW2, spouseW2, spouseNetSE, filingStatus) {
+// spouseK1 is signed S-Corp K-1 income (positive = profit, negative = loss).
+// K-1 is NOT subject to SE tax — one of the main S-Corp advantages over sole prop.
+function estimateTax(hisNetSE, hisW2, spouseW2, spouseNetSE, spouseK1, filingStatus) {
   const hisSE = Math.max(0, hisNetSE);
   const hisWages = Math.max(0, hisW2);
   const spWages = Math.max(0, spouseW2);
   const spSE = Math.max(0, spouseNetSE);
+  const spK1 = Number(spouseK1) || 0; // can be negative
   const fs = (filingStatus === 'mfj') ? 'mfj' : 'single';
 
   const seTaxHis    = seTaxOn(hisSE, hisWages);
   const seTaxSpouse = seTaxOn(spSE,  spWages);
   const seTaxTotal  = seTaxHis + seTaxSpouse;
 
-  const householdAgi = hisWages + spWages + hisSE + spSE - seTaxTotal / 2;
+  const householdAgi = hisWages + spWages + hisSE + spSE + spK1 - seTaxTotal / 2;
   if (householdAgi <= 0 && seTaxTotal <= 0) {
     return { se_tax_his: 0, se_tax_spouse: 0, se_tax: 0, fed_tax: 0, ca_tax: 0, total: 0 };
   }
@@ -126,6 +129,7 @@ const SETTINGS_DEFAULTS = {
   expected_spouse_w2_income: 0,
   expected_spouse_w2_federal_withholding: 0, expected_spouse_w2_state_withholding: 0,
   expected_spouse_se_income: 0, expected_spouse_se_expenses: 0,
+  expected_spouse_scorp_k1: 0,
   prior_year_total_tax: 0, prior_year_agi: 0,
   prior_year_federal_tax: 0, prior_year_ca_tax: 0
 };
@@ -385,6 +389,7 @@ app.put('/api/settings', async (req, res) => {
     expected_spouse_w2_state_withholding: b.expected_spouse_w2_state_withholding,
     expected_spouse_se_income: b.expected_spouse_se_income,
     expected_spouse_se_expenses: b.expected_spouse_se_expenses,
+    expected_spouse_scorp_k1: b.expected_spouse_scorp_k1,
     prior_year_total_tax: b.prior_year_total_tax,
     prior_year_federal_tax: b.prior_year_federal_tax,
     prior_year_ca_tax: b.prior_year_ca_tax,
@@ -523,13 +528,14 @@ app.get('/api/summary', async (req, res) => {
   const spouseSeGross = Number(settings.expected_spouse_se_income) || 0;
   const spouseSeExpenses = Number(settings.expected_spouse_se_expenses) || 0;
   const spouseNetSe = Math.max(0, spouseSeGross - spouseSeExpenses);
+  const spouseScorpK1 = Number(settings.expected_spouse_scorp_k1) || 0;
 
   // Household withholding — both spouses accrue evenly per IRS rules.
   const fedWHTotal = w2FedWH + spouseFedWH;
   const stateWHTotal = w2StateWH + spouseStateWH;
   const w2WHTotal = fedWHTotal + stateWHTotal;
 
-  const projTax = estimateTax(projNetSE, w2Income, spouseW2Income, spouseNetSe, settings.filing_status);
+  const projTax = estimateTax(projNetSE, w2Income, spouseW2Income, spouseNetSe, spouseScorpK1, settings.filing_status);
 
   // ---- Tax payments and SEP ----
   const taxes = taxRes.data || [];
@@ -695,10 +701,11 @@ app.get('/api/summary', async (req, res) => {
     projected_spouse_se_gross: spouseSeGross,
     projected_spouse_se_expenses: spouseSeExpenses,
     projected_spouse_net_se: spouseNetSe,
+    projected_spouse_scorp_k1: spouseScorpK1,
     projected_spouse_w2_federal_withholding: spouseFedWH,
     projected_spouse_w2_state_withholding: spouseStateWH,
     projected_household_w2: w2Income + spouseW2Income,
-    projected_total_income: projIncome + w2Income + spouseW2Income + spouseNetSe,
+    projected_total_income: projIncome + w2Income + spouseW2Income + spouseNetSe + spouseScorpK1,
     projected_se_tax: projTax.se_tax,
     projected_se_tax_his: projTax.se_tax_his,
     projected_se_tax_spouse: projTax.se_tax_spouse,

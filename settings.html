@@ -178,6 +178,13 @@
           <p class="subtitle" style="font-size:11px;margin-top:6px;">Schedule C deductions (mileage, home office, supplies, etc.). Net SE = gross − expenses; her SE tax and household brackets stack on the net.</p>
         </div>
       </div>
+      <div class="row" style="margin-top:14px;">
+        <div>
+          <label for="expected_spouse_scorp_k1">Spouse's annual S-Corp K-1 (profit or loss)</label>
+          <input id="expected_spouse_scorp_k1" type="number" step="0.01">
+          <p class="subtitle" style="font-size:11px;margin-top:6px;">S-Corp pass-through profit (positive) or loss (negative) for the year, AFTER her W-2 salary and all S-Corp operating expenses. Stacks on household brackets but NOT subject to SE tax. Losses limited to her stock + debt basis — enter the deductible amount only.</p>
+        </div>
+      </div>
     </div>
 
     <div class="card">
@@ -236,6 +243,7 @@ const fields = [
   'expected_spouse_w2_income',
   'expected_spouse_w2_federal_withholding', 'expected_spouse_w2_state_withholding',
   'expected_spouse_se_income', 'expected_spouse_se_expenses',
+  'expected_spouse_scorp_k1',
   'prior_year_total_tax', 'prior_year_federal_tax', 'prior_year_ca_tax', 'prior_year_agi'
 ];
 

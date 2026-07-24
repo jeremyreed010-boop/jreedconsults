@@ -138,6 +138,7 @@ async function load() {
       '<table class="pnl-table">' +
         '<tr><td>Your businesses net SE income (LLC + DWM)</td><td class="amount">' + dollars(jrc.combined_net_se) + '</td></tr>' +
         (jrc.projected_spouse_net_se > 0 ? '<tr><td>Spouse net SE income</td><td class="amount">' + dollars(jrc.projected_spouse_net_se) + '</td></tr>' : '') +
+        (jrc.projected_spouse_scorp_k1 && Number(jrc.projected_spouse_scorp_k1) !== 0 ? '<tr><td>Spouse S-Corp K-1 (' + (Number(jrc.projected_spouse_scorp_k1) > 0 ? 'profit' : 'loss') + ')</td><td class="amount">' + dollars(jrc.projected_spouse_scorp_k1) + '</td></tr>' : '') +
         '<tr><td>Household W-2 income (both spouses)</td><td class="amount">' + dollars((Number(jrc.projected_w2_income)||0) + (Number(jrc.projected_spouse_w2_income)||0)) + '</td></tr>' +
         '<tr class="subtotal"><td>Projected household total income</td><td class="amount">' + dollars(jrc.projected_total_income) + '</td></tr>' +
         '<tr><td style="padding-top:14px;">Projected SE tax (15.3% × 92.35%, both spouses)</td><td class="amount" style="padding-top:14px;">' + dollars(jrc.projected_se_tax) + '</td></tr>' +

@@ -417,12 +417,15 @@ function render() {
   const sepSub = 'Room left: ' + dollars(Math.max(0, s.sep_remaining - plannedSep)) +
     (plannedSep > 0 ? ' · Planning ' + dollars(plannedSep) : '');
 
-  const spouseTotalIncome = (s.projected_spouse_w2_income || 0) + (s.projected_spouse_net_se || 0);
-  const spouseIncomeSub = spouseTotalIncome > 0
+  const spouseK1 = Number(s.projected_spouse_scorp_k1) || 0;
+  const spouseTotalIncome = (s.projected_spouse_w2_income || 0) + (s.projected_spouse_net_se || 0) + spouseK1;
+  const spouseParts = [];
+  if (s.projected_spouse_w2_income > 0) spouseParts.push('W-2 ' + dollars(s.projected_spouse_w2_income));
+  if (s.projected_spouse_net_se > 0) spouseParts.push('net SE ' + dollars(s.projected_spouse_net_se));
+  if (spouseK1 !== 0) spouseParts.push('S-Corp K-1 ' + dollars(spouseK1));
+  const spouseIncomeSub = spouseTotalIncome !== 0
     ? ' · Spouse: ' + dollars(spouseTotalIncome) +
-      (s.projected_spouse_net_se > 0
-        ? ' (W-2 ' + dollars(s.projected_spouse_w2_income || 0) + ' + net SE ' + dollars(s.projected_spouse_net_se) + ')'
-        : '')
+      (spouseParts.length > 1 ? ' (' + spouseParts.join(' + ') + ')' : '')
     : '';
   const seTaxSub = s.projected_se_tax_spouse > 0
     ? 'His SE ' + dollars(s.projected_se_tax_his) + ' · Her SE ' + dollars(s.projected_se_tax_spouse) + ' · Fed ' + dollars(s.projected_fed_tax) + ' · CA ' + dollars(s.projected_ca_tax)
