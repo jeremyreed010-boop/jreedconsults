@@ -70,6 +70,13 @@
           </select>
         </div>
         <div>
+          <label for="payer">Payer</label>
+          <select id="payer">
+            <option value="self">Self</option>
+            <option value="spouse">Spouse</option>
+          </select>
+        </div>
+        <div>
           <label for="confirmation">Confirmation #</label>
           <input id="confirmation" type="text" placeholder="EFTPS / FTB ref">
         </div>
@@ -88,9 +95,9 @@
   <div class="card" style="padding:0;">
     <table>
       <thead><tr>
-        <th>Date</th><th>Year</th><th>Qtr</th><th>Jurisdiction</th><th>Amount</th><th>Confirmation</th><th>Notes</th><th></th>
+        <th>Date</th><th>Year</th><th>Qtr</th><th>Payer</th><th>Jurisdiction</th><th>Amount</th><th>Confirmation</th><th>Notes</th><th></th>
       </tr></thead>
-      <tbody id="rows"><tr><td colspan="8" style="padding:18px;color:#999;">Loading…</td></tr></tbody>
+      <tbody id="rows"><tr><td colspan="9" style="padding:18px;color:#999;">Loading…</td></tr></tbody>
     </table>
   </div>
 </div>
@@ -119,6 +126,7 @@ function enterEditMode(p) {
   document.getElementById('jurisdiction').value = p.jurisdiction;
   document.getElementById('tax_year').value = p.tax_year;
   document.getElementById('quarter').value = p.quarter || '';
+  document.getElementById('payer').value = p.payer || 'self';
   document.getElementById('confirmation').value = p.confirmation || '';
   document.getElementById('notes').value = p.notes || '';
   document.getElementById('submit-btn').textContent = 'Update payment';
@@ -140,13 +148,17 @@ function exitEditMode() {
 
 document.getElementById('cancel-btn').addEventListener('click', exitEditMode);
 
+function payerLabel(p) {
+  return p === 'spouse' ? 'Spouse' : 'Self';
+}
+
 async function load() {
   const r = await window.apiFetch('/api/tax_payments');
   const tbody = document.getElementById('rows');
-  if (!r.ok) { tbody.innerHTML = '<tr><td colspan="8" class="error">Failed to load.</td></tr>'; return; }
+  if (!r.ok) { tbody.innerHTML = '<tr><td colspan="9" class="error">Failed to load.</td></tr>'; return; }
   currentRows = await r.json();
   if (currentRows.length === 0) {
-    tbody.innerHTML = '<tr><td colspan="8" style="padding:18px;color:#999;">No payments yet. Add your first above.</td></tr>';
+    tbody.innerHTML = '<tr><td colspan="9" style="padding:18px;color:#999;">No payments yet. Add your first above.</td></tr>';
     return;
   }
   tbody.innerHTML = currentRows.map(function (p) {
@@ -154,6 +166,7 @@ async function load() {
       '<td>' + p.payment_date + '</td>' +
       '<td>' + p.tax_year + '</td>' +
       '<td>' + (p.quarter ? 'Q' + p.quarter : '—') + '</td>' +
+      '<td>' + payerLabel(p.payer) + '</td>' +
       '<td>' + jurisdictionLabel(p.jurisdiction) + '</td>' +
       '<td>' + dollars(p.amount) + '</td>' +
       '<td>' + (p.confirmation || '—') + '</td>' +
@@ -188,6 +201,7 @@ document.getElementById('tax-form').addEventListener('submit', async function (e
     jurisdiction: document.getElementById('jurisdiction').value,
     tax_year: parseInt(document.getElementById('tax_year').value, 10),
     quarter: document.getElementById('quarter').value ? parseInt(document.getElementById('quarter').value, 10) : null,
+    payer: document.getElementById('payer').value || 'self',
     confirmation: document.getElementById('confirmation').value || null,
     notes: document.getElementById('notes').value || null
   };

@@ -151,9 +151,31 @@
       </div>
       <div class="row" style="margin-top:14px;">
         <div>
-          <label for="expected_spouse_w2_income">Spouse's annual W-2 income (MFJ)</label>
+          <label for="expected_spouse_w2_income">Spouse's annual W-2 income</label>
           <input id="expected_spouse_w2_income" type="number" step="0.01" min="0">
-          <p class="subtitle" style="font-size:11px;margin-top:6px;">Combined gross income from spouse's W-2s + K-1. Used for tax bracket stacking only — assumes spouse covers her own quarterly payments / W-2 withholding.</p>
+          <p class="subtitle" style="font-size:11px;margin-top:6px;">Spouse's W-2 Box 1 (federal taxable wages).</p>
+        </div>
+        <div>
+          <label for="expected_spouse_w2_federal_withholding">Spouse annual federal WH</label>
+          <input id="expected_spouse_w2_federal_withholding" type="number" step="0.01" min="0">
+          <p class="subtitle" style="font-size:11px;margin-top:6px;">Spouse W-2 Box 2. Credited against joint federal tax.</p>
+        </div>
+        <div>
+          <label for="expected_spouse_w2_state_withholding">Spouse annual CA WH</label>
+          <input id="expected_spouse_w2_state_withholding" type="number" step="0.01" min="0">
+          <p class="subtitle" style="font-size:11px;margin-top:6px;">Spouse W-2 Box 17. Credited against joint CA tax.</p>
+        </div>
+      </div>
+      <div class="row" style="margin-top:14px;">
+        <div>
+          <label for="expected_spouse_se_income">Spouse's annual SE gross revenue</label>
+          <input id="expected_spouse_se_income" type="number" step="0.01" min="0">
+          <p class="subtitle" style="font-size:11px;margin-top:6px;">Spouse's self-employment gross receipts (before expenses).</p>
+        </div>
+        <div>
+          <label for="expected_spouse_se_expenses">Spouse's annual SE expenses</label>
+          <input id="expected_spouse_se_expenses" type="number" step="0.01" min="0">
+          <p class="subtitle" style="font-size:11px;margin-top:6px;">Schedule C deductions (mileage, home office, supplies, etc.). Net SE = gross − expenses; her SE tax and household brackets stack on the net.</p>
         </div>
       </div>
     </div>
@@ -173,16 +195,22 @@
       </div>
       <div class="row" style="margin-top:10px;">
         <div>
-          <label for="prior_year_total_tax">Prior year total tax ($)</label>
-          <input id="prior_year_total_tax" type="number" step="0.01" min="0">
-          <p class="subtitle" style="font-size:11px;margin-top:6px;">Federal + CA combined, from last year's actual filing.</p>
+          <label for="prior_year_federal_tax">Prior year federal tax ($)</label>
+          <input id="prior_year_federal_tax" type="number" step="0.01" min="0">
+          <p class="subtitle" style="font-size:11px;margin-top:6px;">1040 line 24 (Total tax). Drives IRS safe harbor floor.</p>
+        </div>
+        <div>
+          <label for="prior_year_ca_tax">Prior year CA tax ($)</label>
+          <input id="prior_year_ca_tax" type="number" step="0.01" min="0">
+          <p class="subtitle" style="font-size:11px;margin-top:6px;">CA 540 line 64 (Total tax). Drives FTB safe harbor floor.</p>
         </div>
         <div>
           <label for="prior_year_agi">Prior year AGI ($)</label>
           <input id="prior_year_agi" type="number" step="0.01" min="0">
-          <p class="subtitle" style="font-size:11px;margin-top:6px;">If > $150,000, safe harbor uses 110% of prior tax.</p>
+          <p class="subtitle" style="font-size:11px;margin-top:6px;">1040 line 11. If > $150k, both safe harbors use 110%.</p>
         </div>
       </div>
+      <input id="prior_year_total_tax" type="hidden">
     </div>
 
     <button class="primary" type="submit">Save settings</button>
@@ -206,7 +234,9 @@ const fields = [
   'expected_jreedconsults_income', 'expected_dwm_income',
   'expected_w2_income', 'expected_w2_federal_withholding', 'expected_w2_state_withholding',
   'expected_spouse_w2_income',
-  'prior_year_total_tax', 'prior_year_agi'
+  'expected_spouse_w2_federal_withholding', 'expected_spouse_w2_state_withholding',
+  'expected_spouse_se_income', 'expected_spouse_se_expenses',
+  'prior_year_total_tax', 'prior_year_federal_tax', 'prior_year_ca_tax', 'prior_year_agi'
 ];
 
 async function load() {

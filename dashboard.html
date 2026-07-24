@@ -54,6 +54,68 @@
     .badge-short   { background: #f4d4d4; color: #8b3a3a; }
     .badge-upcoming { background: #f0e8d0; color: #7a6a3a; }
     .pace-past { color: #5a6b5f; }
+
+    .mode-toggle {
+      display: inline-flex;
+      background: #f4ead2;
+      border: 1px solid #d6d0bd;
+      padding: 3px;
+      margin-bottom: 16px;
+    }
+    .mode-toggle button {
+      background: transparent;
+      border: 0;
+      padding: 8px 14px;
+      font: inherit;
+      font-size: 11px;
+      letter-spacing: 1.5px;
+      text-transform: uppercase;
+      color: #5a6b5f;
+      cursor: pointer;
+    }
+    .mode-toggle button.active {
+      background: #1b4332;
+      color: #f5ecd5;
+    }
+    .mode-toggle button:disabled { opacity: 0.4; cursor: not-allowed; }
+    .mode-note {
+      font-size: 11px;
+      color: #7a8a7e;
+      margin: -6px 0 16px;
+      font-style: italic;
+    }
+    .sep-planner {
+      background: #fdf9ec;
+      border: 1px solid #ece5cf;
+      padding: 14px 16px;
+      margin-top: 12px;
+    }
+    .sep-planner label {
+      font-size: 11px;
+      letter-spacing: 1.5px;
+      text-transform: uppercase;
+      color: #5a6b5f;
+      display: block;
+      margin-bottom: 6px;
+    }
+    .sep-planner .input-row {
+      display: flex;
+      gap: 12px;
+      align-items: center;
+    }
+    .sep-planner input[type=range] { flex: 1; }
+    .sep-planner input[type=number] {
+      width: 120px;
+      padding: 6px 8px;
+      font-size: 13px;
+      border: 1px solid #d6d0bd;
+    }
+    .sep-planner .savings {
+      margin-top: 10px;
+      font-size: 12px;
+      color: #2d5a40;
+    }
+    .sep-planner .savings strong { color: #1b4332; }
   </style>
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
   <script src="/supabase-config.js"></script>
@@ -104,10 +166,17 @@
   <h2>Income &amp; Deductions <span id="biz-label" style="font-weight:400;color:#7a8a7e;text-transform:none;letter-spacing:0;font-size:13px;"></span></h2>
   <div class="stat-grid" id="biz-stats"></div>
 
-  <h2 style="margin-top:32px;">Tax Planning <span style="font-weight:400;color:#7a8a7e;text-transform:none;letter-spacing:0;font-size:13px;">(combined — IRS sees one return)</span></h2>
+  <h2 style="margin-top:32px;">Tax Planning <span style="font-weight:400;color:#7a8a7e;text-transform:none;letter-spacing:0;font-size:13px;">(household — MFJ joint return view)</span></h2>
+
+  <div class="mode-toggle" id="mode-toggle">
+    <button data-mode="projected" class="active">Projected 2026 Tax</button>
+    <button data-mode="safe_harbor">Prior Year Safe Harbor</button>
+  </div>
+  <p class="mode-note" id="mode-note"></p>
+
   <div class="stat-grid" id="tax-stats"></div>
 
-  <h2 style="margin-top:32px;">Per-Quarter Pace</h2>
+  <h2 style="margin-top:32px;">Per-Quarter Pace <span style="font-weight:400;color:#7a8a7e;text-transform:none;letter-spacing:0;font-size:13px;" id="pace-basis"></span></h2>
   <div class="card" style="padding:0;">
     <table class="pace-table">
       <thead><tr>
@@ -153,15 +222,19 @@ function renderHero(s) {
     const due = new Date(s.recommended_due_date);
     const days = Math.ceil((due - new Date()) / 86400000);
     const qLabel = 'Q' + s.recommended_quarter;
+    const split = (s.recommended_fed != null && s.recommended_ca != null)
+      ? '<div class="hero-sub">Fed ' + dollarsRound(s.recommended_fed) + ' · CA ' + dollarsRound(s.recommended_ca) + '</div>'
+      : '';
     leftHtml =
       '<div class="hero-label">Recommended ' + qLabel + ' payment</div>' +
       '<div class="hero-value">' + dollarsRound(s.recommended_next_payment) + '</div>' +
       '<div class="hero-sub">Pay by ' + s.recommended_due_date + ' (' + days + ' day' + (days === 1 ? '' : 's') + ' away)</div>' +
+      split +
       (s.using_projection ? '' : '<div class="hero-sub" style="color:#e8b563;margin-top:8px;">⚠ Using YTD only — set annual income targets in <a href="/settings.html" style="color:#c9a961;">Settings</a> to enable real full-year projection.</div>');
   } else {
     leftHtml =
       '<div class="hero-label">All quarterly deadlines passed</div>' +
-      '<div class="hero-value">' + dollarsRound(Math.max(0, s.projected_total_tax - s.total_taxes_paid)) + '</div>' +
+      '<div class="hero-value">' + dollarsRound(Math.max(0, s.total_target_full_year - s.total_taxes_paid)) + '</div>' +
       '<div class="hero-sub">Remaining tax estimated above</div>';
   }
 
@@ -190,30 +263,123 @@ function renderPace(pace) {
       badge = '<span class="badge badge-short">✗ Short ' + dollarsRound(q.gap) + '</span>';
     }
     const cls = q.is_past ? '' : ' style="color:#5a6b5f;"';
+    const detail = (q.fed_target_cumulative != null)
+      ? '<div style="font-size:11px;color:#7a8a7e;">Fed ' + dollars(q.fed_target_cumulative) + ' · CA ' + dollars(q.ca_target_cumulative) + '</div>'
+      : '';
+    const paidDetail = (q.fed_paid_cumulative != null)
+      ? '<div style="font-size:11px;color:#7a8a7e;">Fed ' + dollars(q.fed_paid_cumulative) + ' · CA ' + dollars(q.ca_paid_cumulative) + '</div>'
+      : '';
     return '<tr' + cls + '>' +
       '<td>Q' + q.quarter + '</td>' +
       '<td>' + q.due_date + '</td>' +
-      '<td class="amount">' + dollars(q.target_cumulative) + '</td>' +
-      '<td class="amount">' + dollars(q.paid_cumulative) + '</td>' +
+      '<td class="amount">' + dollars(q.target_cumulative) + detail + '</td>' +
+      '<td class="amount">' + dollars(q.paid_cumulative) + paidDetail + '</td>' +
       '<td class="amount">' + (q.gap > 0 ? dollars(q.gap) : '—') + '</td>' +
       '<td>' + badge + '</td>' +
     '</tr>';
   }).join('');
 }
 
-async function load() {
-  const year = document.getElementById('year').value;
-  const business = document.getElementById('business').value;
-  const r = await window.apiFetch('/api/summary?year=' + year + '&business=' + business);
-  if (!r.ok) {
-    document.getElementById('biz-stats').innerHTML = '<p class="error">Failed to load.</p>';
-    return;
+let currentSummary = null;
+let currentMode = localStorage.getItem('tax_target_mode') || 'projected';
+let plannedSep = 0;
+
+function marginalRate(s) {
+  // Rough marginal rate: SE tax on ~92.35% of net SE plus fed + CA brackets top-out.
+  // Used for the SEP planning "tax savings" estimate.
+  const seNet = Math.max(1, s.projected_net_se);
+  const seRate = s.projected_se_tax / seNet;                // effective SE-tax rate
+  const fedRate = s.projected_fed_tax / seNet;
+  const caRate  = s.projected_ca_tax  / seNet;
+  // SEP contribution reduces income-tax base (fed+CA) but NOT SE tax.
+  return { seRate, fedRate, caRate, incomeRate: fedRate + caRate };
+}
+
+function applySepAdjustment(s, planned) {
+  if (!planned || planned <= 0) return s;
+  const rates = marginalRate(s);
+  const savings = planned * rates.incomeRate;
+  const adj = Object.assign({}, s);
+  adj.projected_net_se = s.projected_net_se; // SEP is an above-the-line adjustment, not a Sched C expense
+  adj.projected_fed_tax = Math.max(0, s.projected_fed_tax - planned * rates.fedRate);
+  adj.projected_ca_tax  = Math.max(0, s.projected_ca_tax  - planned * rates.caRate);
+  adj.projected_total_tax = adj.projected_se_tax + adj.projected_fed_tax + adj.projected_ca_tax;
+
+  // Rescale targets and quarterly pace against the new total.
+  const scale = s.projected_total_tax > 0 ? (adj.projected_total_tax / s.projected_total_tax) : 1;
+  if (!s.using_safe_harbor) {
+    adj.total_target_full_year = s.total_target_full_year * scale;
+    adj.fed_target_full_year   = s.fed_target_full_year   * scale;
+    adj.ca_target_full_year    = s.ca_target_full_year    * scale;
+    adj.quarterly_pace = (s.quarterly_pace || []).map(q => {
+      const nq = Object.assign({}, q);
+      nq.target_cumulative     = q.target_cumulative     * scale;
+      nq.fed_target_cumulative = (q.fed_target_cumulative || 0) * scale;
+      nq.ca_target_cumulative  = (q.ca_target_cumulative  || 0) * scale;
+      nq.gap = Math.max(0, nq.target_cumulative - q.paid_cumulative);
+      nq.on_track = q.paid_cumulative >= nq.target_cumulative - 0.01;
+      return nq;
+    });
+    // Recompute recommended payment against the updated next-quarter gap.
+    const next = (adj.quarterly_pace || []).find(q => !q.is_past);
+    if (next) {
+      adj.recommended_next_payment = next.gap;
+      adj.recommended_fed = Math.max(0, next.fed_target_cumulative - (next.fed_paid_cumulative || 0));
+      adj.recommended_ca  = Math.max(0, next.ca_target_cumulative  - (next.ca_paid_cumulative  || 0));
+    }
   }
-  const s = await r.json();
+  adj.remaining_full_year = Math.max(0, adj.total_target_full_year - s.total_credits);
+  adj._sep_savings = savings;
+  adj._sep_planned = planned;
+  return adj;
+}
+
+function renderModeToggle(s) {
+  const buttons = document.querySelectorAll('#mode-toggle button');
+  buttons.forEach(b => {
+    b.classList.toggle('active', b.dataset.mode === currentMode);
+    if (b.dataset.mode === 'safe_harbor') {
+      b.disabled = s.safe_harbor_floor == null;
+    }
+  });
+  const note = document.getElementById('mode-note');
+  if (s.using_safe_harbor) {
+    note.textContent = 'Targets locked to safe harbor floor (' + dollars(s.safe_harbor_floor) + '). Late-2026 profit spikes will not raise quarterly requirements — retain cash until April 15.';
+  } else if (s.safe_harbor_floor == null) {
+    note.textContent = 'Safe harbor unavailable — set Prior year total tax in Settings to enable.';
+  } else {
+    note.textContent = 'Targets based on projected 2026 tax. Switch to Safe Harbor to lock quarterly minimums to last year’s tax × 1.10.';
+  }
+  const basis = document.getElementById('pace-basis');
+  basis.textContent = s.using_safe_harbor
+    ? '— safe harbor basis (' + dollars(s.total_target_full_year) + ')'
+    : '— projected 2026 tax basis (' + dollars(s.total_target_full_year) + ')';
+}
+
+function renderSepPlanner(s) {
+  const room = Math.max(0, Number(s.sep_remaining) || 0);
+  const capped = Math.min(plannedSep, room);
+  return '<div class="sep-planner">' +
+    '<label>Planned SEP-IRA contribution (up to ' + dollars(room) + ')</label>' +
+    '<div class="input-row">' +
+      '<input type="range" id="sep-range" min="0" max="' + Math.round(room) + '" step="100" value="' + Math.round(capped) + '">' +
+      '<input type="number" id="sep-num" min="0" max="' + room + '" step="100" value="' + Math.round(capped) + '">' +
+    '</div>' +
+    (capped > 0
+      ? '<div class="savings">Estimated tax savings: <strong>' + dollars(s._sep_savings || 0) + '</strong> at ~' + Math.round((marginalRate(currentSummary).incomeRate) * 100) + '% marginal (fed + CA). SE tax unchanged (SEP is above-the-line).</div>'
+      : '<div class="savings">Model a contribution to see the projected tax reduction.</div>') +
+    '</div>';
+}
+
+function render() {
+  if (!currentSummary) return;
+  const s = applySepAdjustment(currentSummary, plannedSep);
+  const business = document.getElementById('business').value;
 
   document.getElementById('biz-label').textContent = '— ' + BIZ_LABELS[business];
 
   renderHero(s);
+  renderModeToggle(s);
 
   const incomeLabel =
     business === 'dwm' ? 'Partner pay received' :
@@ -238,22 +404,82 @@ async function load() {
 
   const projectedLabel = s.using_projection ? '(full year projected)' : '(YTD only — set targets in Settings)';
   const safeHarborStat = s.safe_harbor_floor != null
-    ? { label: 'Safe harbor floor', value: dollars(s.safe_harbor_floor), sub: 'Min to pay to avoid penalty' }
-    : { label: 'Safe harbor floor', value: '—', sub: 'Set prior-year tax in Settings' };
+    ? {
+        label: 'Safe harbor floor',
+        value: dollars(s.safe_harbor_floor),
+        sub: (s.safe_harbor_fed_floor != null || s.safe_harbor_ca_floor != null)
+          ? 'IRS: ' + (s.safe_harbor_fed_floor != null ? dollars(s.safe_harbor_fed_floor) : '—') +
+            ' · CA: ' + (s.safe_harbor_ca_floor != null ? dollars(s.safe_harbor_ca_floor) : '—')
+          : 'Min to pay to avoid penalty'
+      }
+    : { label: 'Safe harbor floor', value: '—', sub: 'Set prior-year fed + CA tax in Settings' };
+
+  const sepSub = 'Room left: ' + dollars(Math.max(0, s.sep_remaining - plannedSep)) +
+    (plannedSep > 0 ? ' · Planning ' + dollars(plannedSep) : '');
+
+  const spouseTotalIncome = (s.projected_spouse_w2_income || 0) + (s.projected_spouse_net_se || 0);
+  const spouseIncomeSub = spouseTotalIncome > 0
+    ? ' · Spouse: ' + dollars(spouseTotalIncome) +
+      (s.projected_spouse_net_se > 0
+        ? ' (W-2 ' + dollars(s.projected_spouse_w2_income || 0) + ' + net SE ' + dollars(s.projected_spouse_net_se) + ')'
+        : '')
+    : '';
+  const seTaxSub = s.projected_se_tax_spouse > 0
+    ? 'His SE ' + dollars(s.projected_se_tax_his) + ' · Her SE ' + dollars(s.projected_se_tax_spouse) + ' · Fed ' + dollars(s.projected_fed_tax) + ' · CA ' + dollars(s.projected_ca_tax)
+    : 'SE ' + dollars(s.projected_se_tax) + ' · Fed ' + dollars(s.projected_fed_tax) + ' · CA ' + dollars(s.projected_ca_tax);
+  const credSub = 'His W-2 W/H: ' + dollars(s.projected_w2_withholding - ((s.projected_spouse_w2_federal_withholding||0) + (s.projected_spouse_w2_state_withholding||0))) +
+    ((s.projected_spouse_w2_federal_withholding||0) + (s.projected_spouse_w2_state_withholding||0) > 0
+      ? ' · Her W-2 W/H: ' + dollars((s.projected_spouse_w2_federal_withholding||0) + (s.projected_spouse_w2_state_withholding||0))
+      : '') +
+    ' · Estimates: ' + dollars(s.total_taxes_paid);
 
   const taxStats = [
-    { label: 'Projected income ' + projectedLabel, value: dollars(s.projected_total_income), sub: 'SE: ' + dollars(s.projected_income) + ' · W-2: ' + dollars(s.projected_w2_income) },
-    { label: 'Projected net SE', value: dollars(s.projected_net_se), sub: 'After SE deductions' },
-    { label: 'Projected total tax', value: dollars(s.projected_total_tax), sub: 'SE ' + dollars(s.projected_se_tax) + ' · Fed ' + dollars(s.projected_fed_tax) + ' · CA ' + dollars(s.projected_ca_tax) },
+    { label: 'Projected income ' + projectedLabel, value: dollars(s.projected_total_income), sub: 'His SE: ' + dollars(s.projected_income) + ' · His W-2: ' + dollars(s.projected_w2_income) + spouseIncomeSub },
+    { label: 'Projected net SE (his)', value: dollars(s.projected_net_se), sub: 'After SE deductions' },
+    { label: 'Household total tax', value: dollars(s.projected_total_tax), sub: seTaxSub },
     safeHarborStat,
-    { label: 'Total tax credits', value: dollars(s.total_credits), sub: 'W-2 W/H: ' + dollars(s.projected_w2_withholding) + ' · Estimates: ' + dollars(s.total_taxes_paid) },
-    { label: 'Remaining to pay (FY)', value: dollars(s.remaining_full_year), sub: 'Projected tax − credits' },
-    { label: 'Combined net SE (YTD)', value: dollars(s.combined_net_se), sub: 'Actual so far' },
-    { label: 'SEP IRA contributed', value: dollars(s.sep_contributed), sub: 'Room left: ' + dollars(s.sep_remaining) }
+    { label: 'Total tax credits', value: dollars(s.total_credits), sub: credSub },
+    { label: 'Remaining to pay (FY)', value: dollars(s.remaining_full_year), sub: 'Target − credits' },
+    { label: 'Combined net SE (YTD)', value: dollars(s.combined_net_se), sub: 'His actual so far' },
+    { label: 'SEP IRA contributed', value: dollars(s.sep_contributed), sub: sepSub, raw: renderSepPlanner(s) }
   ];
-  document.getElementById('tax-stats').innerHTML = renderStats(taxStats);
+  document.getElementById('tax-stats').innerHTML = taxStats.map(x => {
+    const inner = '<div class="stat"><div class="label">' + x.label + '</div>' +
+      '<div class="value">' + x.value + '</div>' +
+      (x.sub ? '<div class="sub">' + x.sub + '</div>' : '') +
+      (x.raw || '') + '</div>';
+    return inner;
+  }).join('');
+
+  // Wire up the SEP planner inputs after rendering.
+  const range = document.getElementById('sep-range');
+  const num = document.getElementById('sep-num');
+  if (range && num) {
+    range.addEventListener('input', () => { plannedSep = Number(range.value) || 0; num.value = range.value; render(); });
+    num.addEventListener('input', () => {
+      const v = Math.max(0, Math.min(Number(num.value) || 0, Number(s.sep_remaining) || 0));
+      plannedSep = v; range.value = v; render();
+    });
+  }
 
   renderPace(s.quarterly_pace || []);
+}
+
+async function load() {
+  const year = document.getElementById('year').value;
+  const business = document.getElementById('business').value;
+  const r = await window.apiFetch('/api/summary?year=' + year + '&business=' + business + '&mode=' + currentMode);
+  if (!r.ok) {
+    document.getElementById('biz-stats').innerHTML = '<p class="error">Failed to load.</p>';
+    return;
+  }
+  currentSummary = await r.json();
+  // If user picked safe-harbor but it isn't available, silently fall back.
+  if (currentMode === 'safe_harbor' && !currentSummary.using_safe_harbor) {
+    currentMode = 'projected';
+    localStorage.setItem('tax_target_mode', currentMode);
+  }
+  render();
 }
 
 (async function init() {
@@ -268,6 +494,15 @@ async function load() {
   sel.value = thisYear;
   sel.addEventListener('change', load);
   document.getElementById('business').addEventListener('change', load);
+  document.querySelectorAll('#mode-toggle button').forEach(b => {
+    b.addEventListener('click', () => {
+      if (b.disabled) return;
+      currentMode = b.dataset.mode;
+      localStorage.setItem('tax_target_mode', currentMode);
+      plannedSep = 0; // reset SEP planner on mode change
+      load();
+    });
+  });
   load();
 })();
 </script>

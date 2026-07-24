@@ -67,32 +67,43 @@ function bracketTax(taxable, brackets) {
   return tax;
 }
 
-function estimateTax(netSE, w2Income, spouseW2Income, filingStatus) {
+function seTaxOn(netSE, w2Wages) {
   const se = Math.max(0, netSE);
-  const w2 = Math.max(0, w2Income);
-  const spouseW2 = Math.max(0, spouseW2Income);
-  const householdNonSE = w2 + spouseW2;
-  if (se <= 0 && householdNonSE <= 0) return { se_tax: 0, fed_tax: 0, ca_tax: 0, total: 0 };
-  const fs = (filingStatus === 'mfj') ? 'mfj' : 'single';
-  // SE tax — his alone. His W-2 (not spouse's) consumes his personal SS wage-base cap.
+  if (se <= 0) return 0;
   const seBase = se * SE_TAX_BASE;
-  const ssRoom = Math.max(0, SS_WAGE_BASE_2026 - w2);
+  const ssRoom = Math.max(0, SS_WAGE_BASE_2026 - Math.max(0, w2Wages));
   const ssTaxableSE = Math.min(seBase, ssRoom);
-  const seTax = ssTaxableSE * 0.124 + seBase * 0.029;
-  // Household income tax — brackets stack on combined AGI (his W-2 + spouse W-2 + his SE)
-  const householdAgi = householdNonSE + se - seTax / 2;
+  return ssTaxableSE * 0.124 + seBase * 0.029;
+}
+
+// Household joint-return view. Both people's SE tax + a single bracket calc on
+// combined AGI. This is what actually appears on the 1040/540 when filing MFJ.
+function estimateTax(hisNetSE, hisW2, spouseW2, spouseNetSE, filingStatus) {
+  const hisSE = Math.max(0, hisNetSE);
+  const hisWages = Math.max(0, hisW2);
+  const spWages = Math.max(0, spouseW2);
+  const spSE = Math.max(0, spouseNetSE);
+  const fs = (filingStatus === 'mfj') ? 'mfj' : 'single';
+
+  const seTaxHis    = seTaxOn(hisSE, hisWages);
+  const seTaxSpouse = seTaxOn(spSE,  spWages);
+  const seTaxTotal  = seTaxHis + seTaxSpouse;
+
+  const householdAgi = hisWages + spWages + hisSE + spSE - seTaxTotal / 2;
+  if (householdAgi <= 0 && seTaxTotal <= 0) {
+    return { se_tax_his: 0, se_tax_spouse: 0, se_tax: 0, fed_tax: 0, ca_tax: 0, total: 0 };
+  }
   const fedTaxable = Math.max(0, householdAgi - FED_STD_DEDUCTION[fs]);
   const caTaxable  = Math.max(0, householdAgi - CA_STD_DEDUCTION[fs]);
   const householdFed = bracketTax(fedTaxable, FED_BRACKETS_2026[fs]);
   const householdCa  = bracketTax(caTaxable,  CA_BRACKETS_2026[fs]);
-  // Allocate household income tax to him by income share. Spouse covers her own share.
-  const totalIncome = householdNonSE + se;
-  const hisShare = totalIncome > 0 ? (w2 + se) / totalIncome : 0;
   return {
-    se_tax: seTax,
-    fed_tax: householdFed * hisShare,
-    ca_tax:  householdCa  * hisShare,
-    total:   seTax + (householdFed + householdCa) * hisShare
+    se_tax_his:    seTaxHis,
+    se_tax_spouse: seTaxSpouse,
+    se_tax:        seTaxTotal,
+    fed_tax:       householdFed,
+    ca_tax:        householdCa,
+    total:         seTaxTotal + householdFed + householdCa
   };
 }
 
@@ -113,7 +124,10 @@ const SETTINGS_DEFAULTS = {
   expected_jreedconsults_income: 0, expected_dwm_income: 0,
   expected_w2_income: 0, expected_w2_federal_withholding: 0, expected_w2_state_withholding: 0,
   expected_spouse_w2_income: 0,
-  prior_year_total_tax: 0, prior_year_agi: 0
+  expected_spouse_w2_federal_withholding: 0, expected_spouse_w2_state_withholding: 0,
+  expected_spouse_se_income: 0, expected_spouse_se_expenses: 0,
+  prior_year_total_tax: 0, prior_year_agi: 0,
+  prior_year_federal_tax: 0, prior_year_ca_tax: 0
 };
 
 async function getSettings(userId) {
@@ -285,6 +299,7 @@ app.post('/api/tax_payments', async (req, res) => {
     user_id: req.user.id, payment_date: b.payment_date, amount: b.amount,
     jurisdiction: b.jurisdiction, tax_year: b.tax_year,
     quarter: b.quarter || null, confirmation: b.confirmation || null,
+    payer: b.payer === 'spouse' ? 'spouse' : 'self',
     notes: b.notes || null
   }).select().single();
   if (error) return res.status(500).json({ error: error.message });
@@ -292,7 +307,7 @@ app.post('/api/tax_payments', async (req, res) => {
 });
 app.patch('/api/tax_payments/:id', async (req, res) => {
   const fields = {};
-  ['payment_date', 'amount', 'jurisdiction', 'tax_year', 'quarter', 'confirmation', 'notes']
+  ['payment_date', 'amount', 'jurisdiction', 'tax_year', 'quarter', 'confirmation', 'payer', 'notes']
     .forEach(k => { if (k in req.body) fields[k] = req.body[k]; });
   const { data, error } = await db.from('tax_payments').update(fields)
     .eq('id', req.params.id).eq('user_id', req.user.id).select().single();
@@ -366,7 +381,13 @@ app.put('/api/settings', async (req, res) => {
     expected_w2_federal_withholding: b.expected_w2_federal_withholding,
     expected_w2_state_withholding: b.expected_w2_state_withholding,
     expected_spouse_w2_income: b.expected_spouse_w2_income,
+    expected_spouse_w2_federal_withholding: b.expected_spouse_w2_federal_withholding,
+    expected_spouse_w2_state_withholding: b.expected_spouse_w2_state_withholding,
+    expected_spouse_se_income: b.expected_spouse_se_income,
+    expected_spouse_se_expenses: b.expected_spouse_se_expenses,
     prior_year_total_tax: b.prior_year_total_tax,
+    prior_year_federal_tax: b.prior_year_federal_tax,
+    prior_year_ca_tax: b.prior_year_ca_tax,
     prior_year_agi: b.prior_year_agi,
     updated_at: new Date().toISOString()
   };
@@ -379,6 +400,7 @@ app.put('/api/settings', async (req, res) => {
 app.get('/api/summary', async (req, res) => {
   const year = parseInt(req.query.year, 10) || new Date().getFullYear();
   const business = req.query.business || 'combined';
+  const targetMode = req.query.mode === 'safe_harbor' ? 'safe_harbor' : 'projected';
   const yearStart = year + '-01-01';
   const yearEnd = year + '-12-31';
 
@@ -491,15 +513,23 @@ app.get('/api/summary', async (req, res) => {
     projNetSE = combined.netIncome;
   }
 
-  // ---- W-2 inputs (annual projections) ----
+  // ---- W-2 + spouse inputs (annual projections) ----
   const w2Income = Number(settings.expected_w2_income) || 0;
   const w2FedWH = Number(settings.expected_w2_federal_withholding) || 0;
   const w2StateWH = Number(settings.expected_w2_state_withholding) || 0;
-  const w2WHTotal = w2FedWH + w2StateWH;
-  // Spouse W-2 — bracket stacking only; her withholding is her responsibility.
   const spouseW2Income = Number(settings.expected_spouse_w2_income) || 0;
+  const spouseFedWH = Number(settings.expected_spouse_w2_federal_withholding) || 0;
+  const spouseStateWH = Number(settings.expected_spouse_w2_state_withholding) || 0;
+  const spouseSeGross = Number(settings.expected_spouse_se_income) || 0;
+  const spouseSeExpenses = Number(settings.expected_spouse_se_expenses) || 0;
+  const spouseNetSe = Math.max(0, spouseSeGross - spouseSeExpenses);
 
-  const projTax = estimateTax(projNetSE, w2Income, spouseW2Income, settings.filing_status);
+  // Household withholding — both spouses accrue evenly per IRS rules.
+  const fedWHTotal = w2FedWH + spouseFedWH;
+  const stateWHTotal = w2StateWH + spouseStateWH;
+  const w2WHTotal = fedWHTotal + stateWHTotal;
+
+  const projTax = estimateTax(projNetSE, w2Income, spouseW2Income, spouseNetSe, settings.filing_status);
 
   // ---- Tax payments and SEP ----
   const taxes = taxRes.data || [];
@@ -511,14 +541,34 @@ app.get('/api/summary', async (req, res) => {
   const sepLimit = sepRoom(projNetSE, projTax.se_tax);
   const sepRemaining = Math.max(0, sepLimit - sepContributed);
 
-  // ---- Safe harbor ----
-  const priorTax = Number(settings.prior_year_total_tax);
+  // ---- Safe harbor (per-agency floors) ----
+  // IRS and CA FTB safe harbors are computed separately from each agency's prior-year
+  // total tax. AGI > $150k triggers the 110% multiplier (same rule both agencies).
   const priorAgi = Number(settings.prior_year_agi);
-  let safeHarborFloor = null;
-  if (priorTax > 0) {
-    const mult = priorAgi > 150000 ? 1.10 : 1.00;
-    safeHarborFloor = priorTax * mult;
-  }
+  const priorFed = Number(settings.prior_year_federal_tax) || Number(settings.prior_year_total_tax) || 0;
+  const priorCa  = Number(settings.prior_year_ca_tax) || 0;
+  const shMult = priorAgi > 150000 ? 1.10 : 1.00;
+  const safeHarborFedFloor = priorFed > 0 ? priorFed * shMult : null;
+  const safeHarborCaFloor  = priorCa  > 0 ? priorCa  * shMult : null;
+  // Combined floor for display; null if either agency's prior-year is missing.
+  const safeHarborFloor = (safeHarborFedFloor != null && safeHarborCaFloor != null)
+    ? safeHarborFedFloor + safeHarborCaFloor
+    : (safeHarborFedFloor != null ? safeHarborFedFloor : safeHarborCaFloor);
+
+  // ---- Target basis: projected 2026 tax or prior-year safe harbor floor (per agency) ----
+  const usingSafeHarbor = targetMode === 'safe_harbor' && (safeHarborFedFloor != null || safeHarborCaFloor != null);
+  const projFedTotal = projTax.se_tax + projTax.fed_tax; // SE tax is federal
+  const projCaTotal = projTax.ca_tax;
+
+  // If safe harbor is requested but only one agency's prior tax is set, use the
+  // projected target for the other side rather than silently zeroing it out.
+  const fedTarget = usingSafeHarbor
+    ? (safeHarborFedFloor != null ? safeHarborFedFloor : projFedTotal)
+    : projFedTotal;
+  const caTarget = usingSafeHarbor
+    ? (safeHarborCaFloor != null ? safeHarborCaFloor : projCaTotal)
+    : projCaTotal;
+  const totalTarget = fedTarget + caTarget;
 
   // ---- Quarterly due dates and pace ----
   const dues = [
@@ -527,55 +577,93 @@ app.get('/api/summary', async (req, res) => {
     { num: 3, date: new Date(year, 8, 15) },
     { num: 4, date: new Date(year + 1, 0, 15) }
   ];
+  // Agency-specific cumulative multipliers.
+  // IRS: even 25/50/75/100. California FTB: 30/70/70/100 (Q3 has no additional CA due).
+  const fedMult = [0.25, 0.50, 0.75, 1.00];
+  const caMult  = [0.30, 0.70, 0.70, 1.00];
   const today = new Date();
   const nextDue = dues.find(d => d.date > today);
 
-  // Recommended next payment: aim for cumulative target by next due, crediting
-  // both quarterly estimates already paid AND W-2 withholding accrued pro-rata.
+  // Per-quarter pace — split by jurisdiction, then combined for the row.
+  // W-2 withholding accrues evenly across the year per IRS rules.
+  const quarterlyPace = dues.map((d, i) => {
+    const fedTargetQ = fedTarget * fedMult[i];
+    const caTargetQ  = caTarget  * caMult[i];
+    const targetQ    = fedTargetQ + caTargetQ;
+
+    const fedW2Accrued   = fedWHTotal   * fedMult[i];
+    const caW2Accrued    = stateWHTotal * caMult[i];
+
+    const fedEstimatesPaid = taxes
+      .filter(p => p.jurisdiction === 'federal' && new Date(p.payment_date) <= d.date)
+      .reduce((s, p) => s + Number(p.amount), 0);
+    const caEstimatesPaid = taxes
+      .filter(p => p.jurisdiction === 'state' && new Date(p.payment_date) <= d.date)
+      .reduce((s, p) => s + Number(p.amount), 0);
+
+    const fedPaid = fedEstimatesPaid + fedW2Accrued;
+    const caPaid  = caEstimatesPaid  + caW2Accrued;
+    const paidQ   = fedPaid + caPaid;
+
+    const fedGap = Math.max(0, fedTargetQ - fedPaid);
+    const caGap  = Math.max(0, caTargetQ  - caPaid);
+    const gap    = fedGap + caGap;
+
+    return {
+      quarter: d.num,
+      due_date: d.date.toISOString().split('T')[0],
+      target_cumulative: targetQ,
+      paid_cumulative: paidQ,
+      gap,
+      fed_target_cumulative: fedTargetQ,
+      ca_target_cumulative: caTargetQ,
+      fed_paid_cumulative: fedPaid,
+      ca_paid_cumulative: caPaid,
+      fed_gap: fedGap,
+      ca_gap: caGap,
+      is_past: d.date < today,
+      on_track: paidQ >= targetQ - 0.01
+    };
+  });
+
+  // Recommended next payment: fill the fed + CA gap at the next upcoming due date.
   let recommendedNext = 0;
   let recommendedDueDate = null;
   let recommendedQuarter = null;
+  let recommendedFed = 0;
+  let recommendedCa = 0;
   if (nextDue) {
-    const cumTarget = projTax.total * (nextDue.num / 4);
-    const w2Accrued = w2WHTotal * (nextDue.num / 4);
-    recommendedNext = Math.max(0, cumTarget - totalPaid - w2Accrued);
+    const nextPace = quarterlyPace[nextDue.num - 1];
+    recommendedFed = nextPace.fed_gap;
+    recommendedCa  = nextPace.ca_gap;
+    recommendedNext = recommendedFed + recommendedCa;
     recommendedDueDate = nextDue.date.toISOString().split('T')[0];
     recommendedQuarter = nextDue.num;
   }
 
   // Set-aside % — of every SE-income dollar, how much to bank for taxes that
   // W-2 withholding doesn't already cover.
-  const taxAfterW2 = Math.max(0, projTax.total - w2WHTotal);
+  const taxAfterW2 = Math.max(0, totalTarget - w2WHTotal);
   const setAsidePct = projIncome > 0 ? (taxAfterW2 / projIncome) : 0;
 
   // Total credits: W-2 withholding (full year) + estimates paid YTD
   const totalCredits = w2WHTotal + totalPaid;
-  const remainingFullYear = Math.max(0, projTax.total - totalCredits);
-
-  // Per-quarter pace — W-2 withholding accrues evenly across the year per IRS rules
-  const quarterlyPace = dues.map(d => {
-    const target = projTax.total * (d.num / 4);
-    const w2Accrued = w2WHTotal * (d.num / 4);
-    const estimatesPaid = taxes
-      .filter(p => new Date(p.payment_date) <= d.date)
-      .reduce((s, p) => s + Number(p.amount), 0);
-    const paidByDate = estimatesPaid + w2Accrued;
-    return {
-      quarter: d.num,
-      due_date: d.date.toISOString().split('T')[0],
-      target_cumulative: target,
-      paid_cumulative: paidByDate,
-      gap: Math.max(0, target - paidByDate),
-      is_past: d.date < today,
-      on_track: paidByDate >= target - 0.01
-    };
-  });
+  const remainingFullYear = Math.max(0, totalTarget - totalCredits);
 
   res.json({
     year, business,
     mileage_rate: Number(settings.irs_mileage_rate),
     filing_status: settings.filing_status,
     using_projection: usingProjection,
+    target_mode: targetMode,
+    using_safe_harbor: usingSafeHarbor,
+    fed_target_full_year: fedTarget,
+    ca_target_full_year: caTarget,
+    total_target_full_year: totalTarget,
+    safe_harbor_fed_floor: safeHarborFedFloor,
+    safe_harbor_ca_floor: safeHarborCaFloor,
+    recommended_fed: recommendedFed,
+    recommended_ca: recommendedCa,
 
     // Filtered (business-specific YTD)
     game_count: filtered.gameCount,
@@ -603,8 +691,17 @@ app.get('/api/summary', async (req, res) => {
     projected_w2_federal_withholding: w2FedWH,
     projected_w2_state_withholding: w2StateWH,
     projected_w2_withholding: w2WHTotal,
-    projected_total_income: projIncome + w2Income,
+    projected_spouse_w2_income: spouseW2Income,
+    projected_spouse_se_gross: spouseSeGross,
+    projected_spouse_se_expenses: spouseSeExpenses,
+    projected_spouse_net_se: spouseNetSe,
+    projected_spouse_w2_federal_withholding: spouseFedWH,
+    projected_spouse_w2_state_withholding: spouseStateWH,
+    projected_household_w2: w2Income + spouseW2Income,
+    projected_total_income: projIncome + w2Income + spouseW2Income + spouseNetSe,
     projected_se_tax: projTax.se_tax,
+    projected_se_tax_his: projTax.se_tax_his,
+    projected_se_tax_spouse: projTax.se_tax_spouse,
     projected_fed_tax: projTax.fed_tax,
     projected_ca_tax: projTax.ca_tax,
     projected_total_tax: projTax.total,
