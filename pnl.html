@@ -134,21 +134,26 @@ async function load() {
     '<h2 style="text-align:center;margin-top:0;">Year ' + year + '</h2>' +
     renderBusinessSection('J. Reed Consults LLC', 'Schedule C (Sole proprietor / disregarded entity)', jrc, expJrc) +
     renderBusinessSection('DWM — Unreimbursed Partner Expenses', 'For Schedule E. Income shown is partner pay received; reconcile with K-1 line 4 at year-end.', dwm, expDwm) +
-    '<div class="pnl-section"><h2>Personal Tax Summary (combined)</h2>' +
+    '<div class="pnl-section"><h2>Household Tax Summary (MFJ joint return)</h2>' +
       '<table class="pnl-table">' +
-        '<tr><td>Combined net SE income</td><td class="amount">' + dollars(jrc.combined_net_se) + '</td></tr>' +
-        '<tr><td>Estimated SE tax (15.3% × 92.35%)</td><td class="amount">' + dollars(jrc.estimated_se_tax) + '</td></tr>' +
-        '<tr><td>Estimated federal tax</td><td class="amount">' + dollars(jrc.estimated_fed_tax) + '</td></tr>' +
-        '<tr><td>Estimated CA tax</td><td class="amount">' + dollars(jrc.estimated_ca_tax) + '</td></tr>' +
-        '<tr class="subtotal"><td>Estimated total tax liability</td><td class="amount">' + dollars(jrc.estimated_total_tax) + '</td></tr>' +
-        '<tr class="indent"><td>Federal payments made</td><td class="amount">' + dollars(jrc.federal_taxes_paid) + '</td></tr>' +
-        '<tr class="indent"><td>State (CA) payments made</td><td class="amount">' + dollars(jrc.state_taxes_paid) + '</td></tr>' +
-        '<tr class="subtotal"><td>Total estimated taxes paid</td><td class="amount">' + dollars(jrc.total_taxes_paid) + '</td></tr>' +
-        '<tr class="total"><td>Estimated remaining tax owed</td><td class="amount">' + dollars(jrc.remaining_tax_owed) + '</td></tr>' +
+        '<tr><td>Your businesses net SE income (LLC + DWM)</td><td class="amount">' + dollars(jrc.combined_net_se) + '</td></tr>' +
+        (jrc.projected_spouse_net_se > 0 ? '<tr><td>Spouse net SE income</td><td class="amount">' + dollars(jrc.projected_spouse_net_se) + '</td></tr>' : '') +
+        '<tr><td>Household W-2 income (both spouses)</td><td class="amount">' + dollars((Number(jrc.projected_w2_income)||0) + (Number(jrc.projected_spouse_w2_income)||0)) + '</td></tr>' +
+        '<tr class="subtotal"><td>Projected household total income</td><td class="amount">' + dollars(jrc.projected_total_income) + '</td></tr>' +
+        '<tr><td style="padding-top:14px;">Projected SE tax (15.3% × 92.35%, both spouses)</td><td class="amount" style="padding-top:14px;">' + dollars(jrc.projected_se_tax) + '</td></tr>' +
+        '<tr><td>Projected federal income tax</td><td class="amount">' + dollars(jrc.projected_fed_tax) + '</td></tr>' +
+        '<tr><td>Projected CA income tax</td><td class="amount">' + dollars(jrc.projected_ca_tax) + '</td></tr>' +
+        '<tr class="subtotal"><td>Projected household total tax</td><td class="amount">' + dollars(jrc.projected_total_tax) + '</td></tr>' +
+        (jrc.safe_harbor_floor != null ? '<tr class="indent"><td>Safe harbor floor (110% × prior year tax)</td><td class="amount">' + dollars(jrc.safe_harbor_floor) + '</td></tr>' : '') +
+        '<tr><td style="padding-top:14px;">W-2 withholding (household, projected)</td><td class="amount" style="padding-top:14px;">' + dollars(jrc.projected_w2_withholding) + '</td></tr>' +
+        '<tr class="indent"><td>Federal estimated payments (both spouses)</td><td class="amount">' + dollars(jrc.federal_taxes_paid) + '</td></tr>' +
+        '<tr class="indent"><td>State (CA) estimated payments (both spouses)</td><td class="amount">' + dollars(jrc.state_taxes_paid) + '</td></tr>' +
+        '<tr class="subtotal"><td>Total credits</td><td class="amount">' + dollars(jrc.total_credits) + '</td></tr>' +
+        '<tr class="total"><td>Estimated remaining tax owed at filing</td><td class="amount">' + dollars(jrc.remaining_full_year) + '</td></tr>' +
         '<tr><td style="padding-top:18px;">SEP IRA contributed</td><td class="amount" style="padding-top:18px;">' + dollars(jrc.sep_contributed) + '</td></tr>' +
         '<tr class="indent"><td>SEP room remaining</td><td class="amount">' + dollars(jrc.sep_remaining) + '</td></tr>' +
       '</table>' +
-      '<p class="subtitle" style="font-size:11px;margin-top:18px;">Tax estimate uses simplified 2026 brackets (' + jrc.filing_status + ' filer) and assumes business income is your only taxable income. Treat as planning rough estimate, not tax advice.</p>' +
+      '<p class="subtitle" style="font-size:11px;margin-top:18px;">Household projection includes both spouses\' W-2 income + SE income, stacked on MFJ brackets. Uses simplified 2026 federal + CA brackets. Treat as planning rough estimate, not tax advice.</p>' +
     '</div>';
 }
 
