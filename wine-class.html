@@ -373,8 +373,10 @@
       display: flex;
       flex-direction: column;
     }
-    .compare-side.carn { background: linear-gradient(175deg, #f3ead1, #d9c89f); }
-    .compare-side.ruth { background: linear-gradient(175deg, #e8c788, #a67a3a); color: var(--ink); }
+    .compare-side.carn  { background: linear-gradient(175deg, #f3ead1, #d9c89f); }
+    .compare-side.ruth  { background: linear-gradient(175deg, #e8c788, #a67a3a); color: var(--ink); }
+    .compare-side.champ { background: linear-gradient(175deg, #faf0c4, #e8d99a); }
+    .compare-side.chab  { background: linear-gradient(175deg, #f1e8af, #c7b870); }
     .compare-img {
       width: 100%;
       aspect-ratio: 16 / 10;
@@ -716,56 +718,42 @@
   </div>
 </section>
 
-<!-- ======================================================== DEEP DIVE 1 : PIERRE PÉTERS -->
+<!-- ======================================================== FRANCE COMPARE -->
 <section id="france" class="section-cream">
-  <div class="wrap split">
-    <div class="image-slot img-champ reveal">
-      <img src="/images/champagne.jpg" alt="Champagne vineyard with sun">
+  <div class="wrap">
+    <div class="reveal" style="text-align:center;">
+      <div class="eyebrow">Wines #1 &amp; #2</div>
+      <h2>Pierre Péters <em>·</em> Raveneau</h2>
+      <p class="lede" style="margin:0 auto;">The French foundation. Chalk and limestone, sparkling and still.</p>
     </div>
-    <div class="reveal d1">
-      <div class="eyebrow">Wine #1 · The Opener</div>
-      <h2><em>Pierre Péters.</em><br>Chalk, bubbles, memory.</h2>
-      <p class="lede">A grower-producer in the Grand Cru village of Le Mesnil-sur-Oger, the Côte des Blancs' most celebrated village for Blanc de Blancs. The Cuvée de Réserve is 100% Chardonnay from a perpetual reserve blend going back decades.</p>
-      <div class="fact-strip">
-        <div class="fact">
-          <div class="label">Village</div>
-          <div class="value">Le Mesnil Grand Cru</div>
-        </div>
-        <div class="fact">
-          <div class="label">Encépagement</div>
-          <div class="value">100% Chardonnay</div>
-        </div>
-        <div class="fact">
-          <div class="label">Signature</div>
-          <div class="value">Saline, precise, long</div>
+
+    <div class="compare reveal">
+      <div class="compare-side champ">
+        <img class="compare-img" src="/images/champagne.jpg" alt="Champagne vineyard">
+        <div class="compare-body">
+          <div class="where">Wine #1</div>
+          <h3>Pierre Péters</h3>
+          <ul>
+            <li><strong>Place</strong><span>Le Mesnil-sur-Oger. Grand Cru village, Côte des Blancs.</span></li>
+            <li><strong>Soil</strong><span>Pure chalk. Porous, cool, mineral.</span></li>
+            <li><strong>Style</strong><span>Blanc de Blancs. 100% Chardonnay. Grower-producer, perpetual reserve blend.</span></li>
+            <li><strong>Winemaking</strong><span>Méthode Champenoise. Extended lees aging.</span></li>
+            <li><strong>In the glass</strong><span>Chalk, brioche, lemon curd, salinity.</span></li>
+          </ul>
         </div>
       </div>
-    </div>
-  </div>
-</section>
-
-<!-- ======================================================== DEEP DIVE 2 : RAVENEAU -->
-<section>
-  <div class="wrap split reverse">
-    <div class="image-slot img-chab reveal">
-      <img src="/images/chablis.jpg" alt="Chablis vineyard">
-    </div>
-    <div class="reveal d1">
-      <div class="eyebrow">Wine #2 · The Benchmark</div>
-      <h2><em>Raveneau.</em><br>Chablis, in its purest form.</h2>
-      <p class="lede">If one producer defines Chablis, it is Raveneau. Tiny production. No new oak. Chardonnay grown on Kimmeridgian limestone, fossilized oyster beds laid down 150 million years ago when a shallow sea covered Burgundy.</p>
-      <div class="fact-strip">
-        <div class="fact">
-          <div class="label">Soil</div>
-          <div class="value">Kimmeridgian limestone</div>
-        </div>
-        <div class="fact">
-          <div class="label">Oak</div>
-          <div class="value">Old barrels only</div>
-        </div>
-        <div class="fact">
-          <div class="label">Signature</div>
-          <div class="value">Flint, oyster shell, iron</div>
+      <div class="compare-side chab">
+        <img class="compare-img" src="/images/chablis.jpg" alt="Chablis vineyard">
+        <div class="compare-body">
+          <div class="where">Wine #2</div>
+          <h3>Raveneau</h3>
+          <ul>
+            <li><strong>Place</strong><span>Chablis Premier Cru · Montée de Tonnerre. Northern Burgundy.</span></li>
+            <li><strong>Soil</strong><span>Kimmeridgian limestone. Fossilized oyster beds, 150 million years old.</span></li>
+            <li><strong>Style</strong><span>Still, dry. 100% Chardonnay.</span></li>
+            <li><strong>Winemaking</strong><span>No new oak. Old barrels only.</span></li>
+            <li><strong>In the glass</strong><span>Flint, oyster shell, green apple, iron.</span></li>
+          </ul>
         </div>
       </div>
     </div>
@@ -801,7 +789,7 @@
             <li><strong>Soil</strong><span>Clay and loam over bay mud. Water-retentive, slow-ripening.</span></li>
             <li><strong>Harvest</strong><span>Later. Grapes hang longer in the cool, developing complexity.</span></li>
             <li><strong>Winemaking</strong><span>Often less new oak. Native yeast. Stainless or neutral barrel.</span></li>
-            <li><strong>In the glass</strong><span>Meyer lemon, white peach, saline edge. Bright, taut acidity. Think of a California wine with a Burgundian handshake.</span></li>
+            <li><strong>In the glass</strong><span>Meyer lemon, white peach, saline edge. Bright, taut acidity.</span></li>
           </ul>
         </div>
       </div>
@@ -815,7 +803,7 @@
             <li><strong>Soil</strong><span>Alluvial fans, well-drained. The famous "Rutherford dust."</span></li>
             <li><strong>Harvest</strong><span>Earlier relative to Carneros. Sugars climb fast, acidity drops.</span></li>
             <li><strong>Winemaking</strong><span>More new French oak common. Full malolactic. Lees stirring.</span></li>
-            <li><strong>In the glass</strong><span>Baked apple, pear tart, vanilla, hazelnut, lemon curd. Round, rich, generous. Think California, undisguised.</span></li>
+            <li><strong>In the glass</strong><span>Baked apple, pear tart, vanilla, hazelnut, lemon curd. Round, rich, generous.</span></li>
           </ul>
         </div>
       </div>
